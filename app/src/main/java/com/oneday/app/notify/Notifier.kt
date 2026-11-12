@@ -17,6 +17,9 @@ import com.oneday.app.data.atMillis
 import com.oneday.app.data.MILESTONES
 import com.oneday.app.data.streakDays
 import com.oneday.app.data.today
+import com.oneday.app.data.habitStreak
+import com.oneday.app.data.cravingAlertTime
+import com.oneday.app.data.bucketLabel
 import java.time.LocalDate
 
 object Notifier {
@@ -24,6 +27,7 @@ object Notifier {
     private const val REQ_SUMMARY = 1001
     private const val REQ_GYM = 1002
     private const val REQ_MILESTONE = 1003
+    private const val REQ_CRAVING = 1004
     const val MILESTONE_CHECK_TIME = 9 * 60
 
     fun createChannel(ctx: Context) {
@@ -89,6 +93,13 @@ object Notifier {
         scheduleDaily(ctx, "summary", REQ_SUMMARY, s.summaryOn, s.summaryTime)
         scheduleDaily(ctx, "gym", REQ_GYM, s.gymOn && s.gymDays.isNotEmpty(), s.gymTime)
         scheduleDaily(ctx, "milestone", REQ_MILESTONE, s.milestonesOn && d.streaks.isNotEmpty(), MILESTONE_CHECK_TIME)
+        val alert = cravingAlertTime(d.cravings)
+        scheduleDaily(ctx, "craving", REQ_CRAVING, s.cravingAlertOn && alert != null, alert ?: 0)
+        for (h in d.habits) {
+            val i = intent(ctx, "habit", h.id)
+            val req = ("h" + h.id).hashCode()
+            if (h.remindAt != null) set(ctx, nextDaily(h.remindAt), pending(ctx, req, i)) else cancel(ctx, req, i)
+        }
     }
 
     private fun scheduleDaily(ctx: Context, type: String, req: Int, on: Boolean, minutes: Int) {
@@ -121,6 +132,19 @@ object Notifier {
                 val trainedToday = d.workouts.any { it.date == t }
                 if (dow in d.settings.gymDays && !trainedToday)
                     show(ctx, REQ_GYM, "🏋️ Hora del gimnasio", "Hoy toca entrenar. ¡Un día a la vez!")
+            }
+            "habit" -> {
+                val h = d.habits.firstOrNull { it.id == id } ?: return
+                if (t !in h.doneDays) {
+                    val streak = habitStreak(h)
+                    show(ctx, ("h" + h.id).hashCode(), "${h.emoji} ${h.name}",
+                        if (streak > 0) "Llevas $streak día(s) seguidos. Márcalo hoy para no romper la racha." else "Hoy es buen día para empezar.")
+                }
+            }
+            "craving" -> {
+                val alert = cravingAlertTime(d.cravings) ?: return
+                val peak = (alert + 30) / 180
+                show(ctx, REQ_CRAVING, "🫁 Se acerca tu hora difícil", "Sueles tener antojos entre ${bucketLabel(peak % 8)}. Si llegan, abre One Day y respira 60 segundos.")
             }
             "milestone" -> {
                 d.streaks.forEach { s ->

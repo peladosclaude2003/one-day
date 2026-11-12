@@ -1,7 +1,30 @@
 package com.oneday.app.ui
 
 import androidx.annotation.DrawableRes
+import android.os.Build
+import android.view.HapticFeedbackConstants
+import android.view.View
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.togetherWith
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.snap
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.drawscope.rotate
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.unit.TextUnit
+import com.oneday.app.data.Repo
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -20,6 +43,9 @@ import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.font.Font
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -65,9 +91,28 @@ private val Scheme = darkColorScheme(
     error = Bad,
 )
 
+// ============ Tipografía: Inter con números de ancho fijo ============
+val Inter = FontFamily(
+    Font(R.font.inter_regular, FontWeight.Normal),
+    Font(R.font.inter_medium, FontWeight.Medium),
+    Font(R.font.inter_semibold, FontWeight.SemiBold),
+    Font(R.font.inter_bold, FontWeight.Bold),
+)
+
+private fun TextStyle.inter() = copy(fontFamily = Inter, fontFeatureSettings = "tnum")
+private val base = Typography()
+private val AppTypography = Typography(
+    displayLarge = base.displayLarge.inter(), displayMedium = base.displayMedium.inter(), displaySmall = base.displaySmall.inter(),
+    headlineLarge = base.headlineLarge.inter(), headlineMedium = base.headlineMedium.inter().copy(letterSpacing = (-0.5).sp), headlineSmall = base.headlineSmall.inter(),
+    titleLarge = base.titleLarge.inter(), titleMedium = base.titleMedium.inter(), titleSmall = base.titleSmall.inter(),
+    bodyLarge = base.bodyLarge.inter(), bodyMedium = base.bodyMedium.inter(), bodySmall = base.bodySmall.inter(),
+    labelLarge = base.labelLarge.inter(), labelMedium = base.labelMedium.inter(), labelSmall = base.labelSmall.inter(),
+)
+
 @Composable
 fun OneDayTheme(content: @Composable () -> Unit) = MaterialTheme(
     colorScheme = Scheme,
+    typography = AppTypography,
     shapes = Shapes(extraLarge = RoundedCornerShape(28.dp), large = RoundedCornerShape(24.dp), medium = RoundedCornerShape(16.dp)),
     content = content,
 )
@@ -76,6 +121,7 @@ fun OneDayTheme(content: @Composable () -> Unit) = MaterialTheme(
 object UiState {
     var blurCount by mutableIntStateOf(0)
     var hideNav by mutableStateOf(false)
+    var sosStreak by mutableStateOf<String?>(null)
 }
 
 @Composable
@@ -107,9 +153,7 @@ fun OdCard(
     content: @Composable ColumnScope.() -> Unit,
 ) {
     Column(
-        modifier.fillMaxWidth().clip(RoundedCornerShape(28.dp)).background(color)
-            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
-            .padding(padding),
+        modifier.fillMaxWidth().pressClick(onClick).clip(RoundedCornerShape(28.dp)).background(color).padding(padding),
         content = content,
     )
 }
@@ -214,15 +258,13 @@ fun CircleButton(desc: String, accent: Boolean = false, onClick: () -> Unit, ico
 @Composable
 fun StatTile(@DrawableRes icon: Int, value: String, label: String, modifier: Modifier = Modifier, delta: String? = null, deltaGood: Boolean = true, valueColor: Color = Ink, onClick: (() -> Unit)? = null) {
     Box(
-        modifier.clip(RoundedCornerShape(28.dp)).background(CardBg)
-            .then(if (onClick != null) Modifier.clickable(onClick = onClick) else Modifier)
-            .padding(vertical = 18.dp, horizontal = 10.dp),
+        modifier.pressClick(onClick).clip(RoundedCornerShape(28.dp)).background(CardBg).padding(vertical = 18.dp, horizontal = 10.dp),
     ) {
         if (delta != null) Text(delta, color = if (deltaGood) Good else Bad, style = MaterialTheme.typography.labelMedium, modifier = Modifier.align(Alignment.TopEnd))
         Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
             OdIcon(icon, Muted, 20.dp)
             Spacer(Modifier.height(10.dp))
-            Text(value, color = valueColor, fontSize = 30.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+            RollingText(value, color = valueColor, fontSize = 30.sp, fontWeight = FontWeight.Bold)
             Spacer(Modifier.height(4.dp))
             Text(label, color = Ink2, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
@@ -247,17 +289,91 @@ fun Segmented(options: List<String>, selected: Int, onSelect: (Int) -> Unit, mod
 /** Casilla redonda: vacía con borde, llena en blanco con palomita oscura. */
 @Composable
 fun RoundCheck(checked: Boolean, onToggle: () -> Unit, desc: String) {
+    val anim = Repo.data.settings.animationsOn
+    val fill by animateFloatAsState(if (checked) 1f else 0f, if (anim) spring(dampingRatio = 0.55f, stiffness = 500f) else snap(), label = "check")
     Box(
-        Modifier.size(48.dp).clip(CircleShape).clickable(role = Role.Checkbox, onClickLabel = desc, onClick = onToggle),
+        Modifier.size(48.dp).clip(CircleShape).clickable(role = Role.Checkbox, onClickLabel = desc) {
+            if (!checked) Fx.success() else Fx.tick()
+            onToggle()
+        },
         contentAlignment = Alignment.Center,
     ) {
-        Box(
-            Modifier.size(26.dp).clip(CircleShape).background(if (checked) Ink else Color.Transparent)
-                .then(if (checked) Modifier else Modifier.border(2.dp, Faint, CircleShape)),
-            contentAlignment = Alignment.Center,
-        ) { if (checked) OdIcon(R.drawable.ic_check, Bg, 16.dp) }
+        Box(Modifier.size(26.dp).clip(CircleShape).border(2.dp, Faint.copy(alpha = 1f - fill), CircleShape), contentAlignment = Alignment.Center) {
+            Box(Modifier.size(26.dp).graphicsLayer { scaleX = fill; scaleY = fill }.clip(CircleShape).background(Ink), contentAlignment = Alignment.Center) {
+                if (fill > 0.3f) OdIcon(R.drawable.ic_check, Bg, 16.dp)
+            }
+        }
     }
 }
+
+// ============ Microinteracciones (todas controlables desde Ajustes) ============
+
+/** Vibración según Ajustes: apagada, suave o fuerte. */
+object Fx {
+    var view: View? = null
+    private fun go(soft: Int, strong: Int) {
+        val s = Repo.data.settings
+        if (!s.hapticsOn) return
+        view?.performHapticFeedback(if (s.hapticStrong) strong else soft, HapticFeedbackConstants.FLAG_IGNORE_VIEW_SETTING)
+    }
+    fun tick() = go(HapticFeedbackConstants.CLOCK_TICK, HapticFeedbackConstants.VIRTUAL_KEY)
+    fun success() = go(
+        if (Build.VERSION.SDK_INT >= 30) HapticFeedbackConstants.CONFIRM else HapticFeedbackConstants.VIRTUAL_KEY,
+        HapticFeedbackConstants.LONG_PRESS,
+    )
+}
+
+/** Clic de tarjeta: se hunde un poco al presionarla (si las animaciones están activas) y vibra suave. */
+@Composable
+fun Modifier.pressClick(onClick: (() -> Unit)?): Modifier {
+    if (onClick == null) return this
+    val source = remember { MutableInteractionSource() }
+    val pressed by source.collectIsPressedAsState()
+    val anim = Repo.data.settings.animationsOn
+    val scale by animateFloatAsState(if (pressed && anim) 0.97f else 1f, spring(stiffness = 600f), label = "press")
+    return this.graphicsLayer { scaleX = scale; scaleY = scale }
+        .clickable(interactionSource = source, indication = null) { Fx.tick(); onClick() }
+}
+
+/** Texto cuyos números ruedan al cambiar (si está activado en Ajustes). */
+@Composable
+fun RollingText(text: String, color: Color = Ink, fontSize: TextUnit = TextUnit.Unspecified, fontWeight: FontWeight? = null, lineHeight: TextUnit = TextUnit.Unspecified) {
+    val s = Repo.data.settings
+    if (!s.rollingNumbersOn || !s.animationsOn) {
+        Text(text, color = color, fontSize = fontSize, fontWeight = fontWeight, maxLines = 1, lineHeight = lineHeight); return
+    }
+    AnimatedContent(
+        targetState = text,
+        transitionSpec = {
+            (slideInVertically(tween(260)) { it } + fadeIn(tween(260))) togetherWith (slideOutVertically(tween(260)) { -it } + fadeOut(tween(200)))
+        }, label = "roll",
+    ) { Text(it, color = color, fontSize = fontSize, fontWeight = fontWeight, maxLines = 1, lineHeight = lineHeight) }
+}
+
+/** Confeti naranja y blanco que cae una vez (récords y metas). Cambia `trigger` para lanzarlo. */
+@Composable
+fun Confetti(trigger: Int, modifier: Modifier = Modifier) {
+    if (trigger == 0 || !Repo.data.settings.celebrationsOn || !Repo.data.settings.animationsOn) return
+    val progress = remember(trigger) { Animatable(0f) }
+    LaunchedEffect(trigger) { progress.snapTo(0f); progress.animateTo(1f, tween(1600, easing = LinearEasing)) }
+    val parts = remember(trigger) {
+        val r = java.util.Random(trigger.toLong())
+        List(46) { floatArrayOf(r.nextFloat(), r.nextFloat() * 0.35f, (r.nextFloat() - 0.5f) * 0.5f, 0.6f + r.nextFloat() * 0.8f, r.nextFloat() * 360f, if (it % 3 == 0) 1f else 0f) }
+    }
+    if (progress.value >= 1f) return
+    Canvas(modifier.fillMaxSize()) {
+        val t = progress.value
+        parts.forEach { (x0, y0, vx, speed, rot, white) ->
+            val x = (x0 + vx * t) * size.width
+            val y = (-0.05f + y0 * 0.2f + speed * t * t * 1.1f) * size.height
+            rotate(rot + t * 540f, Offset(x, y)) {
+                drawRoundRect(if (white == 1f) Ink2 else Accent, topLeft = Offset(x - 5f, y - 9f),
+                    size = androidx.compose.ui.geometry.Size(10f, 18f), cornerRadius = CornerRadius(3f), alpha = (1f - t).coerceIn(0f, 1f))
+            }
+        }
+    }
+}
+private operator fun FloatArray.component6() = this[5]
 
 /** Menú inferior flotante, semitransparente, solo íconos. */
 @Composable

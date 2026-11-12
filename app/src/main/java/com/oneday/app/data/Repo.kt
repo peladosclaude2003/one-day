@@ -20,7 +20,11 @@ object Repo {
         file = f
         if (f.exists()) {
             runCatching { json.decodeFromString<AppData>(f.readText()) }
-                .onSuccess { _state.value = it }
+                .onSuccess { d ->
+                    // Quien ya usaba la app antes de la bienvenida no tiene por qué verla.
+                    val hadData = d.tasks.isNotEmpty() || d.streaks.isNotEmpty() || d.workouts.isNotEmpty()
+                    _state.value = if (!d.settings.onboarded && hadData) d.copy(settings = d.settings.copy(onboarded = true)) else d
+                }
                 .onFailure { f.copyTo(File(f.parentFile, "data-corrupto.json"), overwrite = true) }
         }
     }

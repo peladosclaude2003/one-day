@@ -31,7 +31,9 @@ fun TodayScreen(data: AppData, onOpenSettings: () -> Unit, onGoTab: (Int) -> Uni
     val now = rememberNow()
     var creating by remember { mutableStateOf(false) }
     var editing by remember { mutableStateOf<Task?>(null) }
-    val greeting = when (LocalTime.now().hour) { in 5..11 -> "Buenos días"; in 12..18 -> "Buenas tardes"; else -> "Buenas noches" }
+    val name = data.settings.userName.trim().split(" ").firstOrNull().orEmpty()
+    val greeting = when (LocalTime.now().hour) { in 5..11 -> "Buenos días"; in 12..18 -> "Buenas tardes"; else -> "Buenas noches" } +
+        if (name.isNotEmpty()) ", $name" else ""
 
     val todays = data.tasks.filter { it.date == t }.sortedWith(compareBy<Task> { it.done }.then(taskOrder))
     val overdue = data.tasks.filter { !it.done && it.date != null && it.date < t }
@@ -97,6 +99,23 @@ fun TodayScreen(data: AppData, onOpenSettings: () -> Unit, onGoTab: (Int) -> Uni
                 }
             }
 
+            // Hábitos de hoy
+            if (data.habits.isNotEmpty()) OdCard {
+                val doneH = data.habits.count { t in it.doneDays }
+                CardLabel("Hábitos de hoy", R.drawable.ic_nav_flame, trailing = { Text("$doneH/${data.habits.size}", color = Muted, style = MaterialTheme.typography.bodyMedium) })
+                Spacer(Modifier.height(6.dp))
+                data.habits.forEach { h ->
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        RoundCheck(t in h.doneDays, { toggleHabitToday(h) }, h.name)
+                        Text(h.emoji, fontSize = 18.sp)
+                        Spacer(Modifier.width(8.dp))
+                        Text(h.name, color = if (t in h.doneDays) Faint else Ink, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        val st = habitStreak(h)
+                        if (st > 0) Text("$st d", color = Ink2, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(end = 6.dp))
+                    }
+                }
+            }
+
             // Rachas
             if (data.streaks.isNotEmpty()) OdCard(onClick = { onGoTab(2) }) {
                 CardLabel("Rachas", R.drawable.ic_nav_flame)
@@ -128,7 +147,7 @@ fun TodayScreen(data: AppData, onOpenSettings: () -> Unit, onGoTab: (Int) -> Uni
             }
         }
     }
-    if (creating) TaskDialog(Task(title = "", date = t), isNew = true, onDismiss = { creating = false })
+    if (creating) QuickAddSheet(defaultDate = t) { creating = false }
     editing?.let { TaskDialog(it, isNew = false, onDismiss = { editing = null }) }
 }
 

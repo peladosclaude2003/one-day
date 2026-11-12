@@ -97,6 +97,8 @@ private fun GymOverview(data: AppData) {
             Last30Legend()
         }
 
+        MuscleCard(data)
+
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.height(IntrinsicSize.Min)) {
             val vol = data.weeklyVolume(8)
             OdCard(Modifier.weight(1f).fillMaxHeight(), padding = 0.dp) {
@@ -332,13 +334,15 @@ private fun ActiveWorkout(data: AppData, w: Workout) {
     var addEx by remember { mutableStateOf(false) }
     var editSet by remember { mutableStateOf<Pair<Int, Int>?>(null) } // (entrada, serie); serie = -1 para nueva
     var confirmDiscard by remember { mutableStateOf(false) }
+    var celebrate by remember { mutableIntStateOf(0) }
+    val bests = remember(data.workouts) { w.entries.map { it.exerciseId }.distinct().associateWith { bestsFor(data, it) } }
     val now = rememberNow()
     val mins = ((now - w.startedAt) / 60_000).toInt()
     fun upd(f: (Workout) -> Workout) = Repo.update { d -> d.copy(activeWorkout = d.activeWorkout?.let(f)) }
     DisposableEffect(Unit) { UiState.hideNav = true; onDispose { UiState.hideNav = false } }
     BackHandler { GymUi.minimized = true }
 
-    Column {
+    Box { Column {
         Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             CircleButton("Minimizar", onClick = { GymUi.minimized = true }) { Icon(Icons.Filled.KeyboardArrowDown, null, tint = Ink) }
             Spacer(Modifier.width(12.dp))
@@ -357,6 +361,8 @@ private fun ActiveWorkout(data: AppData, w: Workout) {
             w.entries.forEachIndexed { ei, e ->
                 item(key = "e$ei${e.exerciseId}") {
                     val prev = lastSetsFor(data, e.exerciseId)
+                    val target = suggestTarget(prev)
+                    val best = bests[e.exerciseId]
                     OdCard {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Column(Modifier.weight(1f)) {
@@ -365,6 +371,14 @@ private fun ActiveWorkout(data: AppData, w: Workout) {
                             }
                             IconButton(onClick = { upd { it.copy(entries = it.entries.filterIndexed { i, _ -> i != ei }) } }) { Icon(Icons.Filled.Close, "Quitar ejercicio", tint = Faint) }
                         }
+                        if (target != null) {
+                            Spacer(Modifier.height(8.dp))
+                            Row(Modifier.clip(RoundedCornerShape(50)).background(CardHigh).padding(horizontal = 14.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Text(if (target.up) "↑" else "=", color = if (target.up) Accent else Muted, fontWeight = FontWeight.Bold)
+                                Spacer(Modifier.width(8.dp))
+                                Text("Objetivo de hoy: ${fmtWeight(target.weight)} kg × ${target.reps}", color = Ink2, style = MaterialTheme.typography.bodyMedium)
+                            }
+                        }
                         e.sets.forEachIndexed { si, s ->
                             Row(
                                 Modifier.fillMaxWidth().padding(top = 8.dp).clip(RoundedCornerShape(50)).background(CardHigh)
@@ -372,7 +386,9 @@ private fun ActiveWorkout(data: AppData, w: Workout) {
                                 verticalAlignment = Alignment.CenterVertically,
                             ) {
                                 Text("${si + 1}", color = Faint, modifier = Modifier.width(28.dp))
-                                Text("${fmtWeight(s.weight)} kg", fontWeight = FontWeight.SemiBold, color = Ink, modifier = Modifier.weight(1f))
+                                Text("${fmtWeight(s.weight)} kg", fontWeight = FontWeight.SemiBold, color = Ink)
+                                if (isPr(s, best)) { Spacer(Modifier.width(10.dp)); Text("🏆 Récord", color = Accent, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold) }
+                                Spacer(Modifier.weight(1f))
                                 Text("× ${s.reps}", fontWeight = FontWeight.SemiBold, color = Ink2)
                             }
                         }
@@ -389,6 +405,7 @@ private fun ActiveWorkout(data: AppData, w: Workout) {
         Row(Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             SecondaryButton("Descartar", Modifier.weight(1f), color = Bad) { confirmDiscard = true }
             PrimaryButton("Terminar", Modifier.weight(1.4f)) {
+                Fx.success()
                 Repo.update { d ->
                     val done = w.copy(minutes = mins, entries = w.entries.filter { it.sets.isNotEmpty() })
                     d.copy(activeWorkout = null, workouts = if (done.entries.isEmpty()) d.workouts else d.workouts + done)
@@ -396,15 +413,20 @@ private fun ActiveWorkout(data: AppData, w: Workout) {
             }
         }
     }
+    Confetti(celebrate) }
 
     if (addEx) ExercisePicker(data, onDismiss = { addEx = false }) { id -> upd { it.copy(entries = it.entries + WorkEntry(id)) } }
     editSet?.let { (ei, si) ->
         val entry = w.entries.getOrNull(ei)
         if (entry == null) { editSet = null; return@let }
-        val base = entry.sets.getOrNull(si) ?: entry.sets.lastOrNull() ?: lastSetsFor(data, entry.exerciseId)?.firstOrNull()
+        val base = entry.sets.getOrNull(si) ?: entry.sets.lastOrNull()
+            ?: suggestTarget(lastSetsFor(data, entry.exerciseId))?.let { WorkSet(it.weight, it.reps) }
         SetDialog(exName(data, entry.exerciseId), base, canDelete = si >= 0, onDismiss = { editSet = null },
             onDelete = { upd { it.copy(entries = it.entries.mapIndexed { i, en -> if (i == ei) en.copy(sets = en.sets.filterIndexed { j, _ -> j != si }) else en }) } },
         ) { set ->
+            val prevBest = bests[entry.exerciseId]
+            val hadPr = entry.sets.any { isPr(it, prevBest) }
+            if (isPr(set, prevBest) && !hadPr) { Fx.success(); celebrate++ } else Fx.tick()
             upd { it.copy(entries = it.entries.mapIndexed { i, en ->
                 if (i != ei) en else en.copy(sets = if (si < 0) en.sets + set else en.sets.mapIndexed { j, s -> if (j == si) set else s })
             }) }

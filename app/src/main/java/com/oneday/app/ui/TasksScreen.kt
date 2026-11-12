@@ -92,7 +92,7 @@ fun TasksScreen(data: AppData) {
             }
         }
     }
-    if (creating) TaskDialog(Task(title = "", date = if (filter == 1) t else null), isNew = true, onDismiss = { creating = false })
+    if (creating) QuickAddSheet(defaultDate = if (filter == 1) t else null) { creating = false }
     editing?.let { TaskDialog(it, isNew = false, onDismiss = { editing = null }) }
 }
 

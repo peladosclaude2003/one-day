@@ -52,6 +52,21 @@ data class Workout(
     val minutes: Int = 0,
 )
 
+/** Hábito por construir: se marca una vez al día. `doneDays` = días (epochDay) cumplidos. */
+@Serializable
+data class Habit(
+    val id: String = newId(),
+    val name: String,
+    val emoji: String = "💧",
+    val createdDay: Long,
+    val doneDays: Set<Long> = emptySet(),
+    val remindAt: Int? = null,
+)
+
+/** Antojo superado con el botón SOS. */
+@Serializable
+data class Craving(val streakId: String, val at: Long, val intensity: Int)
+
 @Serializable
 data class BodyWeight(val date: Long, val kg: Double)
 
@@ -65,6 +80,15 @@ data class Settings(
     val milestonesOn: Boolean = true,
     val gymGoal: Int = 4, // días por semana
     val weightGoal: Double? = null,
+    val userName: String = "",
+    val onboarded: Boolean = false,
+    // Microinteracciones: todo se puede apagar.
+    val animationsOn: Boolean = true,
+    val rollingNumbersOn: Boolean = true,
+    val celebrationsOn: Boolean = true,
+    val hapticsOn: Boolean = true,
+    val hapticStrong: Boolean = false,
+    val cravingAlertOn: Boolean = false,
 )
 
 @Serializable
@@ -76,6 +100,8 @@ data class AppData(
     val workouts: List<Workout> = emptyList(),
     val activeWorkout: Workout? = null,
     val bodyWeights: List<BodyWeight> = emptyList(),
+    val habits: List<Habit> = emptyList(),
+    val cravings: List<Craving> = emptyList(),
     val settings: Settings = Settings(),
 )
 

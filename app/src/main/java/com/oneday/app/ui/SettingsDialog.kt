@@ -65,6 +65,28 @@ fun SettingsDialog(data: AppData, onDismiss: () -> Unit) {
                 }
                 ToggleRow("Logros de rachas", "Te felicito al llegar a 1, 3, 7, 30… días", s.milestonesOn) { v -> set { it.copy(milestonesOn = v) } }
 
+                val alert = cravingAlertTime(data.cravings)
+                ToggleRow("Aviso antes de tus antojos", if (alert != null) "Te aviso a las ${fmtTime(alert)}, 30 min antes de tu hora difícil" else "Se activa con 5 antojos registrados", s.cravingAlertOn && alert != null) { v ->
+                    if (alert != null) set { it.copy(cravingAlertOn = v) }
+                }
+
+                HorizontalDivider()
+                Text("ANIMACIONES Y VIBRACIÓN", color = Faint, letterSpacing = 1.2.sp, style = MaterialTheme.typography.labelLarge)
+                ToggleRow("Animaciones", "Casillas, tarjetas y transiciones con movimiento", s.animationsOn) { v -> set { it.copy(animationsOn = v) } }
+                if (s.animationsOn) {
+                    ToggleRow("Números que ruedan", "Las cifras grandes giran al cambiar", s.rollingNumbersOn) { v -> set { it.copy(rollingNumbersOn = v) } }
+                    ToggleRow("Celebraciones", "Confeti en récords y metas de racha", s.celebrationsOn) { v -> set { it.copy(celebrationsOn = v) } }
+                }
+                ToggleRow("Vibración", "Al marcar, guardar y tocar tarjetas", s.hapticsOn) { v -> set { it.copy(hapticsOn = v) }; if (v) Fx.success() }
+                if (s.hapticsOn) Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    ChoicePill("Suave", !s.hapticStrong, Modifier.weight(1f)) { set { it.copy(hapticStrong = false) }; Fx.success() }
+                    ChoicePill("Fuerte", s.hapticStrong, Modifier.weight(1f)) { set { it.copy(hapticStrong = true) }; Fx.success() }
+                }
+
+                HorizontalDivider()
+                Text("PERFIL", color = Faint, letterSpacing = 1.2.sp, style = MaterialTheme.typography.labelLarge)
+                SecondaryButton("Repetir la bienvenida") { set { it.copy(onboarded = false) }; onDismiss() }
+
                 HorizontalDivider()
                 Text("COPIA DE SEGURIDAD", color = Faint, letterSpacing = 1.2.sp, style = MaterialTheme.typography.labelLarge)
                 Text("Tus datos viven solo en este teléfono. Guarda una copia de vez en cuando (por ejemplo en Google Drive) para no perderlos si cambias de celular.", color = Muted, style = MaterialTheme.typography.bodySmall)
