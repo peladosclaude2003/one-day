@@ -1,0 +1,2 @@
+-keep class com.oneday.app.data.** { *; }
+-keepattributes *Annotation*, InnerClasses

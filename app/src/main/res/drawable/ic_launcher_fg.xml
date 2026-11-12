@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <!-- Anillo de progreso -->
+    <path android:strokeColor="#33FFFFFF" android:strokeWidth="5" android:fillColor="#00000000"
+        android:pathData="M54,30 A24,24 0 1,1 53.99,30" />
+    <path android:strokeColor="#FFFF7A1A" android:strokeWidth="5" android:strokeLineCap="round" android:fillColor="#00000000"
+        android:pathData="M54,30 A24,24 0 1,1 30,54" />
+    <!-- Número 1 -->
+    <path android:fillColor="#FFFFFFFF"
+        android:pathData="M51,44 L57,40 L60,40 L60,68 L55,68 L55,47 L51,49 Z" />
+</vector>
