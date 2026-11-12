@@ -38,14 +38,31 @@ class AppTest {
         File(dir, "$name.png").outputStream().use { bmp.compress(Bitmap.CompressFormat.PNG, 100, it) }
     }
 
+    private fun nav(desc: String) { rule.onNodeWithContentDescription(desc, useUnmergedTree = false).performClick(); rule.mainClock.advanceTimeBy(800) }
+    private fun tap(text: String) { rule.onNodeWithText(text).performClick(); rule.mainClock.advanceTimeBy(800) }
+
     @Test fun recorreLaApp() {
         val t = today()
         val now = System.currentTimeMillis()
+        val rutinas = listOf(
+            "Empuje (pecho, hombro, tríceps)" to listOf("ex_banca", "ex_militar", "ex_triceps_polea"),
+            "Jalón (espalda, bíceps)" to listOf("ex_dominadas", "ex_remo", "ex_curl_barra"),
+            "Pierna" to listOf("ex_sentadilla", "ex_prensa", "ex_femoral"),
+        )
+        // ~20 entrenamientos en los últimos 30 días, rotando rutinas, con pesos que suben poco a poco.
+        val dias = (29 downTo 1).filter { java.time.LocalDate.ofEpochDay(t - it).dayOfWeek.value <= 5 && it % 7 != 3 }
+        val workouts = dias.mapIndexed { i, ago ->
+            val (name, ex) = rutinas[i % 3]
+            val prog = i * 1.25
+            Workout(date = t - ago, name = name, startedAt = now - ago * DAY_MS, minutes = 50 + (i * 7) % 25,
+                entries = ex.mapIndexed { j, id -> WorkEntry(id, List(3) { k -> WorkSet(40.0 + j * 15 + prog, 12 - k * 2) }) })
+        }
         Repo.update {
             AppData(
                 tasks = listOf(
                     Task(title = "Llamar al dentista", date = t, time = 10 * 60, priority = 2, remind = true),
                     Task(title = "Comprar proteína", date = t, time = 17 * 60, done = true),
+                    Task(title = "Estudiar inglés 30 min", date = t, time = 20 * 60, priority = 1),
                     Task(title = "Pagar luz", date = t - 1, priority = 1),
                     Task(title = "Leer 20 páginas", priority = 0),
                 ),
@@ -53,31 +70,32 @@ class AppTest {
                     Streak(name = "Fumar", emoji = "🚭", start = now - 12 * DAY_MS - 5 * 3600_000L, bestDays = 20, resets = 1),
                     Streak(name = "Refresco", emoji = "🥤", start = now - 3 * DAY_MS),
                 ),
-                workouts = (0 until 6).map { i ->
-                    Workout(date = t - 12 + i * 2, name = "Empuje (pecho, hombro, tríceps)", startedAt = now - (12 - i * 2) * DAY_MS, minutes = 55,
-                        entries = listOf(WorkEntry("ex_banca", listOf(WorkSet(60.0 + i * 2.5, 10), WorkSet(60.0 + i * 2.5, 8)))))
-                },
+                workouts = workouts,
+                bodyWeights = (0 until 8).map { BodyWeight(t - 28 + it * 4, 74.0 - it * 0.4) },
+                settings = Settings(weightGoal = 70.0, gymGoal = 5),
             )
         }
         rule.mainClock.autoAdvance = false
-        shot("1_hoy")
-        rule.onNodeWithText("Pendientes").performClick(); shot("2_pendientes")
-        rule.onAllNodes(isToggleable())[0].performClick() // marcar "Pagar luz" como hecho
-        shot("3_pendientes_marcado")
+        shot("01_hoy")
+        nav("Pendientes"); shot("02_pendientes")
+        rule.onAllNodes(SemanticsMatcher.expectValue(androidx.compose.ui.semantics.SemanticsProperties.Role, androidx.compose.ui.semantics.Role.Checkbox))[0].performClick()
+        rule.mainClock.advanceTimeBy(800)
         check(Repo.data.tasks.first { it.title == "Pagar luz" }.done) { "No se marcó la tarea" }
-        rule.onNodeWithText("Rachas").performClick(); shot("4_rachas")
-        rule.onNodeWithText("Gym").performClick(); shot("5_gym")
-        rule.onNodeWithText("Historial").performClick(); shot("6_historial")
-        rule.onNodeWithText("Progreso").performClick(); shot("7_progreso")
-        rule.onNodeWithText("Rutinas").performClick(); shot("8_rutinas")
-        rule.onNodeWithText("Entrenar").performClick(); rule.mainClock.advanceTimeBy(1000)
-        rule.onNodeWithText("Pierna").performClick(); shot("9_entrenando")
+        nav("Rachas"); shot("03_rachas")
+        nav("Gym"); shot("04_gym_resumen")
+        rule.onRoot().performTouchInput { swipeUp(startY = bottom * 0.85f, endY = top + 50f) }
+        rule.mainClock.advanceTimeBy(1500); shot("05_gym_resumen_abajo")
+        tap("Historial"); shot("06_historial")
+        tap("Progreso"); shot("07_progreso")
+        tap("Rutinas"); shot("08_rutinas")
+        tap("Resumen")
+        tap("Empezar entrenamiento"); shot("09_entrenando")
         Repo.update { d -> d.copy(activeWorkout = d.activeWorkout!!.let { w ->
             w.copy(entries = w.entries.mapIndexed { i, e -> if (i == 0) e.copy(sets = listOf(WorkSet(80.0, 8), WorkSet(85.0, 6))) else e })
         }) }
         shot("10_entrenando_series")
-        rule.onNodeWithText("Terminar ✔").performClick()
-        rule.onNodeWithText("Hoy").performClick(); shot("11_hoy_final")
-        check(Repo.data.workouts.any { it.name == "Pierna" }) { "No se guardó el entrenamiento" }
+        tap("Terminar")
+        check(Repo.data.activeWorkout == null && Repo.data.workouts.size == workouts.size + 1) { "No se guardó el entrenamiento" }
+        nav("Hoy"); shot("11_hoy_final")
     }
 }

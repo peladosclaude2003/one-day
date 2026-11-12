@@ -20,6 +20,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import com.oneday.app.R
 import com.oneday.app.data.*
 
 fun toggleTask(t: Task) = Repo.update { d ->
@@ -43,57 +45,49 @@ fun TasksScreen(data: AppData) {
     var creating by remember { mutableStateOf(false) }
     val t = today()
 
-    Scaffold(
-        containerColor = Bg,
-        floatingActionButton = {
-            FloatingActionButton(onClick = { creating = true }, containerColor = Accent) { Icon(Icons.Filled.Add, "Nuevo pendiente") }
-        },
-    ) { pad ->
-        Column(Modifier.padding(pad)) {
-            val pending = data.tasks.count { !it.done }
-            ScreenTitle("Pendientes", if (pending == 0) "Todo al día ✨" else "$pending por hacer")
-            Row(Modifier.padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                listOf("Por hacer", "Hoy", "Hechos").forEachIndexed { i, label ->
-                    FilterChip(selected = filter == i, onClick = { filter = i }, label = { Text(label) })
-                }
-            }
-            val groups: List<Pair<String, List<Task>>> = when (filter) {
-                0 -> {
-                    val open = data.tasks.filter { !it.done }.sortedWith(taskOrder)
-                    listOf(
-                        "⚠️ Atrasados" to open.filter { it.date != null && it.date < t },
-                        "Hoy" to open.filter { it.date == t },
-                        "Próximos" to open.filter { it.date != null && it.date > t },
-                        "Sin fecha" to open.filter { it.date == null }.sortedByDescending { it.priority },
-                    )
-                }
-                1 -> listOf("Hoy" to data.tasks.filter { it.date == t }.sortedWith(compareBy<Task> { it.done }.then(taskOrder)))
-                else -> listOf("Completados" to data.tasks.filter { it.done }.sortedByDescending { it.doneAt ?: 0 })
-            }.filter { it.second.isNotEmpty() }
-
-            if (groups.isEmpty()) {
-                EmptyState(
-                    if (filter == 2) "📭" else "✅",
-                    if (filter == 2) "Aún no completas nada" else "No hay pendientes",
-                    if (filter == 2) "Cuando marques una tarea aparecerá aquí." else "Toca el botón + para agregar uno.",
+    Column {
+        val pending = data.tasks.count { !it.done }
+        ScreenTitle("Pendientes", if (pending == 0) "Todo al día ✨" else "$pending por hacer") {
+            CircleButton("Nuevo pendiente", accent = true, onClick = { creating = true }) { Icon(Icons.Filled.Add, null, tint = Bg) }
+        }
+        Segmented(listOf("Por hacer", "Hoy", "Hechos"), filter, { filter = it }, Modifier.padding(horizontal = 16.dp))
+        val groups: List<Pair<String, List<Task>>> = when (filter) {
+            0 -> {
+                val open = data.tasks.filter { !it.done }.sortedWith(taskOrder)
+                listOf(
+                    "Atrasados" to open.filter { it.date != null && it.date < t },
+                    "Hoy" to open.filter { it.date == t },
+                    "Próximos" to open.filter { it.date != null && it.date > t },
+                    "Sin fecha" to open.filter { it.date == null }.sortedByDescending { it.priority },
                 )
             }
-            LazyColumn(contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 96.dp)) {
-                groups.forEach { (title, list) ->
-                    item(key = "h_$title") {
-                        Text(title, color = Muted, style = MaterialTheme.typography.labelLarge, modifier = Modifier.padding(top = 12.dp, bottom = 6.dp, start = 4.dp))
-                    }
-                    items(list, key = { it.id }) { task ->
-                        TaskRow(task, showDate = filter != 1, onToggle = { toggleTask(task) }, onClick = { editing = task })
-                        Spacer(Modifier.height(8.dp))
-                    }
+            1 -> listOf("Hoy" to data.tasks.filter { it.date == t }.sortedWith(compareBy<Task> { it.done }.then(taskOrder)))
+            else -> listOf("Completados" to data.tasks.filter { it.done }.sortedByDescending { it.doneAt ?: 0 })
+        }.filter { it.second.isNotEmpty() }
+
+        if (groups.isEmpty()) {
+            EmptyState(
+                if (filter == 2) "📭" else "✅",
+                if (filter == 2) "Aún no completas nada" else "No hay pendientes",
+                if (filter == 2) "Cuando marques una tarea aparecerá aquí." else "Toca el botón + para agregar uno.",
+            )
+        }
+        LazyColumn(contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 120.dp)) {
+            groups.forEach { (title, list) ->
+                item(key = "h_$title") {
+                    Text(title.uppercase(), color = if (title == "Atrasados") Bad else Faint, style = MaterialTheme.typography.labelMedium,
+                        letterSpacing = 1.2.sp, modifier = Modifier.padding(top = 18.dp, bottom = 8.dp, start = 8.dp))
                 }
-                if (filter == 2 && groups.isNotEmpty()) item {
-                    var confirm by remember { mutableStateOf(false) }
-                    TextButton(onClick = { confirm = true }, modifier = Modifier.fillMaxWidth()) { Text("Borrar completados", color = Bad) }
-                    if (confirm) ConfirmDialog("Borrar completados", "Se eliminarán todas las tareas ya hechas.", onDismiss = { confirm = false }) {
-                        Repo.update { d -> d.copy(tasks = d.tasks.filterNot { it.done }) }
-                    }
+                items(list, key = { it.id }) { task ->
+                    TaskRow(task, showDate = filter != 1, onToggle = { toggleTask(task) }, onClick = { editing = task })
+                    Spacer(Modifier.height(8.dp))
+                }
+            }
+            if (filter == 2 && groups.isNotEmpty()) item {
+                var confirm by remember { mutableStateOf(false) }
+                TextButton(onClick = { confirm = true }, modifier = Modifier.fillMaxWidth()) { Text("Borrar completados", color = Bad) }
+                if (confirm) ConfirmDialog("Borrar completados", "Se eliminarán todas las tareas ya hechas.", onDismiss = { confirm = false }) {
+                    Repo.update { d -> d.copy(tasks = d.tasks.filterNot { it.done }) }
                 }
             }
         }
@@ -106,31 +100,25 @@ fun TasksScreen(data: AppData) {
 fun TaskRow(task: Task, showDate: Boolean = true, onToggle: () -> Unit, onClick: () -> Unit) {
     val overdue = !task.done && task.date != null && task.date < today()
     Row(
-        Modifier.fillMaxWidth().clip(RoundedCornerShape(16.dp)).background(CardBg).clickable(onClick = onClick).padding(end = 12.dp, top = 4.dp, bottom = 4.dp),
+        Modifier.fillMaxWidth().clip(RoundedCornerShape(24.dp)).background(CardBg).clickable(onClick = onClick).padding(start = 4.dp, end = 18.dp, top = 6.dp, bottom = 6.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Checkbox(checked = task.done, onCheckedChange = { onToggle() }, colors = CheckboxDefaults.colors(checkedColor = Good))
+        RoundCheck(task.done, onToggle, task.title)
         Column(Modifier.weight(1f).padding(vertical = 6.dp)) {
             Text(
                 task.title, maxLines = 2, overflow = TextOverflow.Ellipsis,
                 textDecoration = if (task.done) TextDecoration.LineThrough else null,
-                color = if (task.done) Muted else MaterialTheme.colorScheme.onSurface,
-                fontWeight = FontWeight.Medium,
+                color = if (task.done) Faint else Ink, fontWeight = FontWeight.Medium,
             )
             val parts = buildList {
                 if (showDate && task.date != null) add(fmtDay(task.date))
                 if (task.time != null) add(fmtTime(task.time))
+                if (task.notes.isNotBlank()) add(task.notes)
             }
-            if (parts.isNotEmpty() || task.notes.isNotBlank()) {
-                Text(
-                    (parts.joinToString(" · ") + if (task.notes.isNotBlank()) (if (parts.isEmpty()) "" else " · ") + task.notes else ""),
-                    color = if (overdue) Bad else Muted, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis,
-                )
-            }
+            if (parts.isNotEmpty()) Text(parts.joinToString(" · "), color = if (overdue) Bad else Muted, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
-        if (task.remind && !task.done) Icon(Icons.Filled.Notifications, "Con recordatorio", tint = Muted, modifier = Modifier.size(16.dp))
-        Spacer(Modifier.width(8.dp))
-        Box(Modifier.size(10.dp).clip(CircleShape).background(priorityColor(task.priority)))
+        if (task.remind && !task.done) { Icon(Icons.Filled.Notifications, "Con recordatorio", tint = Faint, modifier = Modifier.size(16.dp)); Spacer(Modifier.width(10.dp)) }
+        Box(Modifier.size(8.dp).clip(CircleShape).background(priorityColor(task.priority)))
     }
 }
 
@@ -146,16 +134,16 @@ fun TaskDialog(initial: Task, isNew: Boolean, onDismiss: () -> Unit) {
     var pickTime by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
 
-    AlertDialog(
+    OdDialog(
         onDismissRequest = onDismiss,
         title = { Text(if (isNew) "Nuevo pendiente" else "Editar pendiente") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                OutlinedTextField(title, { title = it }, label = { Text("¿Qué tienes que hacer?") }, singleLine = true, modifier = Modifier.fillMaxWidth())
-                OutlinedTextField(notes, { notes = it }, label = { Text("Notas (opcional)") }, maxLines = 3, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(title, { title = it }, label = { Text("¿Qué tienes que hacer?") }, singleLine = true, shape = RoundedCornerShape(18.dp), modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(notes, { notes = it }, label = { Text("Notas (opcional)") }, maxLines = 3, shape = RoundedCornerShape(18.dp), modifier = Modifier.fillMaxWidth())
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    AssistChip(onClick = { pickDate = true }, label = { Text("📅 " + (date?.let { fmtDay(it) } ?: "Sin fecha")) })
-                    AssistChip(onClick = { pickTime = true }, label = { Text("🕒 " + (time?.let { fmtTime(it) } ?: "Sin hora")) })
+                    ChoicePill(date?.let { fmtDay(it) } ?: "Sin fecha", false, Modifier.weight(1f), lead = { OdIcon(R.drawable.ic_calendar, Muted, 16.dp) }) { pickDate = true }
+                    ChoicePill(time?.let { fmtTime(it) } ?: "Sin hora", false, Modifier.weight(1f), lead = { OdIcon(R.drawable.ic_clock, Muted, 16.dp) }) { pickTime = true }
                 }
                 if (date != null || time != null) {
                     TextButton(onClick = { date = null; time = null; remind = false }, contentPadding = PaddingValues(0.dp)) { Text("Quitar fecha y hora", color = Muted) }
@@ -163,13 +151,12 @@ fun TaskDialog(initial: Task, isNew: Boolean, onDismiss: () -> Unit) {
                 Text("Prioridad", style = MaterialTheme.typography.labelLarge, color = Muted)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     (0..2).forEach { p ->
-                        FilterChip(selected = priority == p, onClick = { priority = p }, label = { Text(priorityName(p)) },
-                            leadingIcon = { Box(Modifier.size(8.dp).clip(CircleShape).background(priorityColor(p))) })
+                        ChoicePill(priorityName(p), priority == p, Modifier.weight(1f), lead = { Box(Modifier.size(8.dp).clip(CircleShape).background(priorityColor(p))) }) { priority = p }
                     }
                 }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
-                        Text("Recordarme")
+                        Text("Recordarme", color = Ink)
                         Text(if (date != null && time != null) "Te aviso a esa hora" else "Elige fecha y hora", color = Muted, style = MaterialTheme.typography.bodySmall)
                     }
                     Switch(checked = remind && date != null && time != null, enabled = date != null && time != null, onCheckedChange = { remind = it })
@@ -184,7 +171,7 @@ fun TaskDialog(initial: Task, isNew: Boolean, onDismiss: () -> Unit) {
                 onDismiss()
             }) { Text("Guardar") }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancelar") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancelar", color = Muted) } },
     )
     if (pickDate) DatePickDialog(date, { pickDate = false }) { date = it }
     if (pickTime) TimePickDialog(time, { pickTime = false }) {

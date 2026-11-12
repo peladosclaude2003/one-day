@@ -57,3 +57,53 @@ fun lastSetsFor(data: AppData, exerciseId: String): List<WorkSet>? =
         .firstNotNullOfOrNull { w -> w.entries.firstOrNull { it.exerciseId == exerciseId && it.sets.isNotEmpty() }?.sets }
 
 fun round1(d: Double) = (d * 10).roundToInt() / 10.0
+
+// ---------- Estadísticas del gimnasio ----------
+
+fun fmtCompact(v: Double): String = when {
+    v >= 1_000_000 -> "%.1fM".format(v / 1_000_000)
+    v >= 10_000 -> "%.0fk".format(v / 1000)
+    v >= 1_000 -> "%.1fk".format(v / 1000)
+    else -> fmtWeight(round1(v))
+}
+
+fun Workout.reps(): Int = entries.sumOf { e -> e.sets.sumOf { it.reps } }
+
+fun mondayOf(epochDay: Long): Long {
+    val d = LocalDate.ofEpochDay(epochDay)
+    return epochDay - (d.dayOfWeek.value - 1)
+}
+
+/** Entrenamientos de los últimos [days] días (incluye hoy). */
+fun AppData.recentWorkouts(days: Int): List<Workout> = workouts.filter { it.date > today() - days }
+
+/** Volumen (kg) por semana, las últimas [weeks] semanas, de la más vieja a la actual. */
+fun AppData.weeklyVolume(weeks: Int = 8): List<Double> {
+    val thisMonday = mondayOf(today())
+    return (weeks - 1 downTo 0).map { w ->
+        val start = thisMonday - w * 7
+        workouts.filter { it.date in start until start + 7 }.sumOf { it.volume() }
+    }
+}
+
+/** Repeticiones por día de la semana actual (lunes a domingo). */
+fun AppData.weekReps(offsetWeeks: Int = 0): List<Int> {
+    val monday = mondayOf(today()) - offsetWeeks * 7
+    return (0 until 7).map { i -> workouts.filter { it.date == monday + i }.sumOf { it.reps() } }
+}
+
+/** Siguiente rutina sugerida: la que sigue a la última que hiciste. */
+fun AppData.suggestedRoutine(): Routine? {
+    if (routines.isEmpty()) return null
+    val last = workouts.maxByOrNull { it.startedAt } ?: return routines.first()
+    val idx = routines.indexOfFirst { it.name == last.name }
+    return if (idx < 0) routines.first() else routines[(idx + 1) % routines.size]
+}
+
+/** Minutos estimados de una rutina: promedio de las veces anteriores, o 12 min por ejercicio. */
+fun AppData.estimatedMinutes(r: Routine): Int {
+    val past = workouts.filter { it.name == r.name && it.minutes > 0 }
+    return if (past.isNotEmpty()) past.map { it.minutes }.average().toInt() else r.exerciseIds.size * 12
+}
+
+fun shortName(name: String): String = name.substringBefore(" (").trim()

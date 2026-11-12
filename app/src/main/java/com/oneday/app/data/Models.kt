@@ -53,6 +53,9 @@ data class Workout(
 )
 
 @Serializable
+data class BodyWeight(val date: Long, val kg: Double)
+
+@Serializable
 data class Settings(
     val summaryOn: Boolean = true,
     val summaryTime: Int = 8 * 60,
@@ -60,6 +63,8 @@ data class Settings(
     val gymTime: Int = 18 * 60,
     val gymDays: Set<Int> = setOf(1, 2, 3, 4, 5), // DayOfWeek: 1 = lunes … 7 = domingo
     val milestonesOn: Boolean = true,
+    val gymGoal: Int = 4, // días por semana
+    val weightGoal: Double? = null,
 )
 
 @Serializable
@@ -70,6 +75,7 @@ data class AppData(
     val routines: List<Routine> = Defaults.routines,
     val workouts: List<Workout> = emptyList(),
     val activeWorkout: Workout? = null,
+    val bodyWeights: List<BodyWeight> = emptyList(),
     val settings: Settings = Settings(),
 )
 

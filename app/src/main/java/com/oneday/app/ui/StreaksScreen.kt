@@ -1,6 +1,10 @@
 package com.oneday.app.ui
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.background
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -41,26 +45,23 @@ fun StreaksScreen(data: AppData) {
     var resetting by remember { mutableStateOf<Streak?>(null) }
     val now = rememberNow()
 
-    Scaffold(
-        containerColor = Bg,
-        floatingActionButton = { FloatingActionButton(onClick = { creating = true }, containerColor = Accent) { Icon(Icons.Filled.Add, "Nueva racha") } },
-    ) { pad ->
-        Column(Modifier.padding(pad)) {
-            ScreenTitle("Rachas", "Un día a la vez")
-            if (data.streaks.isEmpty()) {
-                EmptyState("🔥", "Empieza tu primera racha", "Agrega algo que quieras dejar (fumar, alcohol, azúcar, redes…) y cuenta cada día que lo logras.")
-            }
-            LazyColumn(contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 96.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                items(data.streaks, key = { it.id }) { s ->
-                    StreakCard(s, now, onEdit = { editing = s }, onReset = { resetting = s })
-                }
+    Column {
+        ScreenTitle("Rachas", "Un día a la vez") {
+            CircleButton("Nueva racha", accent = true, onClick = { creating = true }) { Icon(Icons.Filled.Add, null, tint = Bg) }
+        }
+        if (data.streaks.isEmpty()) {
+            EmptyState("🔥", "Empieza tu primera racha", "Agrega algo que quieras dejar (fumar, alcohol, azúcar, redes…) y cuenta cada día que lo logras.")
+        }
+        LazyColumn(contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 120.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            items(data.streaks, key = { it.id }) { s ->
+                StreakCard(s, now, onEdit = { editing = s }, onReset = { resetting = s })
             }
         }
     }
     if (creating) StreakDialog(null) { creating = false }
     editing?.let { s -> StreakDialog(s) { editing = null } }
     resetting?.let { s ->
-        AlertDialog(
+        OdDialog(
             onDismissRequest = { resetting = null },
             title = { Text("¿Reiniciar racha?") },
             text = { Text("No pasa nada, recaer es parte del proceso. Tu récord de ${maxOf(s.bestDays, streakDays(s))} día(s) se guarda y empiezas de nuevo hoy.") },
@@ -72,7 +73,7 @@ fun StreaksScreen(data: AppData) {
                     resetting = null
                 }) { Text("Reiniciar", color = Bad) }
             },
-            dismissButton = { TextButton(onClick = { resetting = null }) { Text("Cancelar") } },
+            dismissButton = { TextButton(onClick = { resetting = null }) { Text("Cancelar", color = Muted) } },
         )
     }
 }
@@ -85,39 +86,41 @@ fun StreakCard(s: Streak, now: Long, onEdit: () -> Unit, onReset: () -> Unit) {
     val prev = prevMilestone(days)
     val next = nextMilestone(days)
     val progress = ((days - prev).toFloat() / (next - prev).toFloat()).coerceIn(0f, 1f)
-    SectionCard {
+    OdCard(padding = 22.dp) {
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(s.emoji, fontSize = 32.sp)
-            Spacer(Modifier.width(12.dp))
+            Box(Modifier.size(52.dp).clip(CircleShape).background(CardHigh), contentAlignment = Alignment.Center) { Text(s.emoji, fontSize = 26.sp) }
+            Spacer(Modifier.width(14.dp))
             Column(Modifier.weight(1f)) {
-                Text("Sin ${s.name.lowercase()}", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                Text(motivation(days), color = Muted, style = MaterialTheme.typography.bodySmall)
+                Text("Sin ${s.name.lowercase()}", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, color = Ink)
+                Text(motivation(days), color = Faint, style = MaterialTheme.typography.bodySmall)
             }
-            IconButton(onClick = onEdit) { Icon(Icons.Filled.Edit, "Editar", tint = Muted) }
+            IconButton(onClick = onEdit) { Icon(Icons.Filled.Edit, "Editar", tint = Faint) }
         }
-        Spacer(Modifier.height(12.dp))
+        Spacer(Modifier.height(14.dp))
         Row(verticalAlignment = Alignment.Bottom) {
-            Text("$days", fontSize = 52.sp, fontWeight = FontWeight.Bold, color = Accent, lineHeight = 52.sp)
+            Text("$days", fontSize = 64.sp, fontWeight = FontWeight.Bold, color = Accent, lineHeight = 64.sp)
             Spacer(Modifier.width(8.dp))
-            Text(if (days == 1L) "día" else "días", style = MaterialTheme.typography.titleMedium, modifier = Modifier.padding(bottom = 8.dp))
-            Spacer(Modifier.width(6.dp))
-            Text("$hours h", color = Muted, modifier = Modifier.padding(bottom = 9.dp))
+            Column(Modifier.padding(bottom = 8.dp)) {
+                Text(if (days == 1L) "día" else "días", style = MaterialTheme.typography.titleMedium, color = Ink)
+                Text("$hours h", color = Muted, style = MaterialTheme.typography.bodySmall)
+            }
             Spacer(Modifier.weight(1f))
-            Column(horizontalAlignment = Alignment.End, modifier = Modifier.padding(bottom = 6.dp)) {
-                Text("🏆 Récord", color = Muted, style = MaterialTheme.typography.labelMedium)
-                Text("$best día(s)", fontWeight = FontWeight.SemiBold)
+            Column(horizontalAlignment = Alignment.End, modifier = Modifier.padding(bottom = 8.dp)) {
+                OdIcon(com.oneday.app.R.drawable.ic_trophy, Muted, 18.dp)
+                Text("$best d", fontWeight = FontWeight.SemiBold, color = Ink)
+                Text("récord", color = Faint, style = MaterialTheme.typography.labelSmall)
             }
         }
-        Spacer(Modifier.height(10.dp))
-        LinearProgressIndicator(progress = { progress }, modifier = Modifier.fillMaxWidth().height(8.dp), color = Accent, trackColor = MaterialTheme.colorScheme.surfaceContainerHighest, strokeCap = androidx.compose.ui.graphics.StrokeCap.Round, gapSize = 0.dp, drawStopIndicator = {})
-        Spacer(Modifier.height(6.dp))
+        Spacer(Modifier.height(14.dp))
+        ThinBar(progress)
+        Spacer(Modifier.height(8.dp))
         Row {
             Text("Próxima meta: $next días", color = Muted, style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
             Text("faltan ${next - days}", color = Muted, style = MaterialTheme.typography.bodySmall)
         }
-        Spacer(Modifier.height(8.dp))
-        OutlinedButton(onClick = onReset, modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(12.dp)) { Text("Recaí, reiniciar contador") }
-        if (s.resets > 0) Text("Reinicios: ${s.resets}", color = Muted, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 6.dp))
+        Spacer(Modifier.height(16.dp))
+        SecondaryButton("Recaí, reiniciar contador", color = Ink2, onClick = onReset)
+        if (s.resets > 0) Text("Reinicios: ${s.resets}", color = Faint, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 8.dp, start = 4.dp))
     }
 }
 
@@ -131,12 +134,12 @@ fun StreakDialog(initial: Streak?, onDismiss: () -> Unit) {
     var pickDate by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
 
-    AlertDialog(
+    OdDialog(
         onDismissRequest = onDismiss,
         title = { Text(if (initial == null) "Nueva racha" else "Editar racha") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                OutlinedTextField(name, { name = it }, label = { Text("¿Qué quieres dejar? (ej. Fumar)") }, singleLine = true, modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(name, { name = it }, label = { Text("¿Qué quieres dejar? (ej. Fumar)") }, singleLine = true, shape = RoundedCornerShape(18.dp), modifier = Modifier.fillMaxWidth())
                 Text("Ícono", color = Muted, style = MaterialTheme.typography.labelLarge)
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     EMOJIS.chunked(6).forEach { row ->
@@ -144,7 +147,7 @@ fun StreakDialog(initial: Streak?, onDismiss: () -> Unit) {
                             row.forEach { e ->
                                 Surface(
                                     shape = RoundedCornerShape(10.dp),
-                                    color = if (e == emoji) Accent.copy(alpha = 0.3f) else MaterialTheme.colorScheme.surfaceContainerHighest,
+                                    color = if (e == emoji) Ink2.copy(alpha = 0.35f) else Color(0xFF2A2A2E),
                                     modifier = Modifier.size(40.dp).clickable { emoji = e },
                                 ) { Box(contentAlignment = Alignment.Center) { Text(e, fontSize = 20.sp) } }
                             }
@@ -152,7 +155,7 @@ fun StreakDialog(initial: Streak?, onDismiss: () -> Unit) {
                     }
                 }
                 Text("¿Desde cuándo?", color = Muted, style = MaterialTheme.typography.labelLarge)
-                AssistChip(onClick = { pickDate = true }, label = { Text("📅 " + fmtDay(startDay)) })
+                ChoicePill(fmtDay(startDay), false, lead = { OdIcon(com.oneday.app.R.drawable.ic_calendar, Muted, 16.dp) }) { pickDate = true }
                 if (initial != null) TextButton(onClick = { confirmDelete = true }, contentPadding = PaddingValues(0.dp)) { Text("Eliminar racha", color = Bad) }
             }
         },
@@ -167,7 +170,7 @@ fun StreakDialog(initial: Streak?, onDismiss: () -> Unit) {
                 onDismiss()
             }) { Text("Guardar") }
         },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancelar") } },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancelar", color = Muted) } },
     )
     if (pickDate) DatePickDialog(startDay, { pickDate = false }) { startDay = minOf(it, today()) }
     if (confirmDelete && initial != null) ConfirmDialog("Eliminar racha", "¿Eliminar la racha \"${initial.name}\"? Se perderá su historial.", onDismiss = { confirmDelete = false }) {

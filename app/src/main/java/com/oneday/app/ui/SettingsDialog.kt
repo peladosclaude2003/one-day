@@ -12,6 +12,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.oneday.app.data.*
 import java.time.LocalDate
 
@@ -37,35 +38,39 @@ fun SettingsDialog(data: AppData, onDismiss: () -> Unit) {
         }
     }
 
-    AlertDialog(
+    OdDialog(
         onDismissRequest = onDismiss,
         title = { Text("Ajustes") },
         text = {
             Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-                Text("Notificaciones", color = Accent, style = MaterialTheme.typography.labelLarge)
+                Text("NOTIFICACIONES", color = Faint, letterSpacing = 1.2.sp, style = MaterialTheme.typography.labelLarge)
                 ToggleRow("Resumen del día", "Cada mañana te digo qué tienes pendiente", s.summaryOn) { v -> set { it.copy(summaryOn = v) } }
-                if (s.summaryOn) AssistChip(onClick = { pickSummary = true }, label = { Text("🕒 " + fmtTime(s.summaryTime)) })
+                if (s.summaryOn) ChoicePill(fmtTime(s.summaryTime), false, lead = { OdIcon(com.oneday.app.R.drawable.ic_clock, Muted, 16.dp) }) { pickSummary = true }
 
                 ToggleRow("Recordatorio de gimnasio", "Solo si ese día aún no entrenas", s.gymOn) { v -> set { it.copy(gymOn = v) } }
                 if (s.gymOn) {
-                    AssistChip(onClick = { pickGym = true }, label = { Text("🕒 " + fmtTime(s.gymTime)) })
+                    ChoicePill(fmtTime(s.gymTime), false, lead = { OdIcon(com.oneday.app.R.drawable.ic_clock, Muted, 16.dp) }) { pickGym = true }
                     Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                         listOf("L", "M", "X", "J", "V", "S", "D").forEachIndexed { i, l ->
                             val d = i + 1
-                            FilterChip(selected = d in s.gymDays, onClick = {
+                            ChoicePill(l, d in s.gymDays, Modifier.weight(1f)) {
                                 set { it.copy(gymDays = if (d in it.gymDays) it.gymDays - d else it.gymDays + d) }
-                            }, label = { Text(l) }, modifier = Modifier.weight(1f))
+                            }
                         }
                     }
+                }
+                Text("Meta de gimnasio: ${s.gymGoal} día(s) por semana", color = Ink)
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    (1..7).forEach { n -> ChoicePill("$n", s.gymGoal == n, Modifier.weight(1f)) { set { it.copy(gymGoal = n) } } }
                 }
                 ToggleRow("Logros de rachas", "Te felicito al llegar a 1, 3, 7, 30… días", s.milestonesOn) { v -> set { it.copy(milestonesOn = v) } }
 
                 HorizontalDivider()
-                Text("Copia de seguridad", color = Accent, style = MaterialTheme.typography.labelLarge)
+                Text("COPIA DE SEGURIDAD", color = Faint, letterSpacing = 1.2.sp, style = MaterialTheme.typography.labelLarge)
                 Text("Tus datos viven solo en este teléfono. Guarda una copia de vez en cuando (por ejemplo en Google Drive) para no perderlos si cambias de celular.", color = Muted, style = MaterialTheme.typography.bodySmall)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Button(onClick = { exporter.launch("one-day-${LocalDate.now()}.json") }, modifier = Modifier.weight(1f)) { Text("Guardar copia") }
-                    OutlinedButton(onClick = { confirmImport = true }, modifier = Modifier.weight(1f)) { Text("Restaurar") }
+                    PrimaryButton("Guardar copia", Modifier.weight(1f)) { exporter.launch("one-day-${LocalDate.now()}.json") }
+                    SecondaryButton("Restaurar", Modifier.weight(1f)) { confirmImport = true }
                 }
             }
         },
@@ -82,7 +87,7 @@ fun SettingsDialog(data: AppData, onDismiss: () -> Unit) {
 private fun ToggleRow(title: String, sub: String, checked: Boolean, onChange: (Boolean) -> Unit) {
     Row(verticalAlignment = Alignment.CenterVertically) {
         Column(Modifier.weight(1f)) {
-            Text(title)
+            Text(title, color = Ink)
             Text(sub, color = Muted, style = MaterialTheme.typography.bodySmall)
         }
         Switch(checked = checked, onCheckedChange = onChange)

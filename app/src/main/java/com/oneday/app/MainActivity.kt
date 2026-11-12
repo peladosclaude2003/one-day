@@ -7,12 +7,19 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
-import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.unit.sp
+import androidx.compose.ui.draw.blur
+import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.oneday.app.data.Repo
 import com.oneday.app.notify.Notifier
@@ -37,27 +44,21 @@ class MainActivity : ComponentActivity() {
                 // Cada vez que cambian tareas, rachas o ajustes, se reprograman los recordatorios.
                 LaunchedEffect(data.tasks, data.settings, data.streaks.size) { Notifier.rescheduleAll(this@MainActivity) }
 
-                Scaffold(
-                    containerColor = Bg,
-                    bottomBar = {
-                        NavigationBar(containerColor = CardBg) {
-                            listOf("📅" to "Hoy", "✅" to "Pendientes", "🔥" to "Rachas", "🏋️" to "Gym").forEachIndexed { i, (icon, label) ->
-                                NavigationBarItem(
-                                    selected = tab == i, onClick = { tab = i },
-                                    icon = { Text(icon, fontSize = 20.sp) }, label = { Text(label) },
-                                    colors = NavigationBarItemDefaults.colors(indicatorColor = Accent.copy(alpha = 0.25f), selectedTextColor = Accent),
-                                )
-                            }
-                        }
-                    },
-                ) { pad ->
-                    Box(Modifier.padding(pad).consumeWindowInsets(pad)) {
+                Box(Modifier.fillMaxSize().background(Bg)) {
+                    Box(Modifier.fillMaxSize().blur(backgroundBlur()).statusBarsPadding().navigationBarsPadding()) {
                         when (tab) {
                             0 -> TodayScreen(data, onOpenSettings = { settings = true }, onGoTab = { tab = it })
                             1 -> TasksScreen(data)
                             2 -> StreaksScreen(data)
                             else -> GymScreen(data)
                         }
+                    }
+                    AnimatedVisibility(
+                        visible = !(UiState.hideNav && tab == 3),
+                        enter = fadeIn() + slideInVertically { it }, exit = fadeOut() + slideOutVertically { it },
+                        modifier = Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(bottom = 16.dp),
+                    ) {
+                        FloatingNav(tab, { tab = it })
                     }
                 }
                 if (settings) SettingsDialog(data) { settings = false }
