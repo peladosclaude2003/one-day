@@ -84,6 +84,23 @@ fun SettingsDialog(data: AppData, onDismiss: () -> Unit) {
                 }
 
                 HorizontalDivider()
+                Text("BARRA Y DISCOS", color = Faint, letterSpacing = 1.2.sp, style = MaterialTheme.typography.labelLarge)
+                Text("Peso de la barra", color = Ink)
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    listOf(20.0, 15.0, 10.0, 7.0).forEach { b -> ChoicePill("${fmtWeight(b)} kg", s.barKg == b, Modifier.weight(1f)) { set { it.copy(barKg = b) } } }
+                }
+                Text("Discos en tu gym", color = Ink)
+                listOf(25.0, 20.0, 15.0, 10.0, 5.0, 2.5, 1.25, 0.5).chunked(4).forEach { row ->
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        row.forEach { p ->
+                            ChoicePill(fmtWeight(p), p in s.plates, Modifier.weight(1f)) {
+                                set { it.copy(plates = if (p in it.plates) it.plates - p else (it.plates + p).sortedDescending()) }
+                            }
+                        }
+                    }
+                }
+
+                HorizontalDivider()
                 Text("PERFIL", color = Faint, letterSpacing = 1.2.sp, style = MaterialTheme.typography.labelLarge)
                 SecondaryButton("Repetir la bienvenida") { set { it.copy(onboarded = false) }; onDismiss() }
 

@@ -76,7 +76,7 @@ private fun GymOverview(data: AppData) {
     val recent = data.recentWorkouts(30)
     val hours = recent.sumOf { it.minutes } / 60.0
     val reps = recent.sumOf { it.reps() }
-    val maxKg = recent.flatMap { w -> w.entries.flatMap { it.sets } }.maxOfOrNull { it.weight } ?: 0.0
+    val maxKg = recent.flatMap { w -> w.entries.flatMap { it.sets } }.filter { it.counts }.maxOfOrNull { it.weight } ?: 0.0
 
     Column(Modifier.verticalScroll(rememberScrollState()).padding(horizontal = 16.dp).padding(bottom = 120.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         HeroWorkoutCard(data) { pickRoutine = true }
@@ -202,6 +202,10 @@ private fun RoutinePickerSheet(data: AppData, onDismiss: () -> Unit) {
                 OdIcon(R.drawable.ic_play, Ink, 26.dp)
             }
         }
+        data.workouts.maxByOrNull { it.startedAt }?.let { last ->
+            Spacer(Modifier.height(8.dp))
+            SecondaryButton("Repetir última: ${shortName(last.name)} · ${fmtDay(last.date).lowercase()}", color = Ink2) { repeatWorkout(last); onDismiss() }
+        }
         Spacer(Modifier.height(8.dp))
         SecondaryButton("Entrenamiento libre (sin rutina)") { startWorkout("Entrenamiento libre", emptyList()); onDismiss() }
     }
@@ -212,7 +216,7 @@ private val Color08 = androidx.compose.ui.graphics.Color.White.copy(alpha = 0.06
 @Composable
 private fun StatSheet(data: AppData, kind: Int, onDismiss: () -> Unit) {
     val recent = data.recentWorkouts(30)
-    val sets = recent.flatMap { w -> w.entries.flatMap { it.sets } }
+    val sets = recent.flatMap { w -> w.entries.flatMap { it.sets } }.filter { it.counts }
     val reps = sets.sumOf { it.reps }
     GlassSheet(onDismiss) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -273,26 +277,38 @@ private fun BodyWeightCard(data: AppData, onClick: () -> Unit) {
     val weights = data.bodyWeights.sortedBy { it.date }
     val last = weights.lastOrNull()
     val goal = data.settings.weightGoal
+    val avg = movingAvg7(weights)
+    val avgNow = avg.lastOrNull()?.second
+    val rate = weeklyChange(weights)
     OdCard(onClick = onClick) {
         CardLabel("Peso corporal", R.drawable.ic_scale, trailing = { Icon(Icons.Filled.KeyboardArrowRight, null, tint = Faint) })
         Spacer(Modifier.height(8.dp))
         Row(verticalAlignment = Alignment.Bottom) {
-            Text(last?.let { fmtWeight(it.kg) } ?: "—", fontSize = 30.sp, fontWeight = FontWeight.Bold, color = Ink)
-            Text(" kg", color = Muted, modifier = Modifier.padding(bottom = 4.dp).weight(1f))
-            Text(
-                when {
-                    last == null -> "Toca para registrar"
-                    goal == null -> "Sin meta"
-                    else -> "Meta · ${fmtWeight(round1(kotlin.math.abs(goal - last.kg)))} kg por llegar"
-                }, color = Muted, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(bottom = 6.dp),
+            RollingText(avgNow?.let { fmtWeight(round1(it)) } ?: "—", color = Ink, fontSize = 30.sp, fontWeight = FontWeight.Bold)
+            Text(" kg", color = Muted, modifier = Modifier.padding(bottom = 4.dp))
+            Text("  media 7 días", color = Faint, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(bottom = 6.dp).weight(1f))
+            if (rate != null) Text(
+                (if (rate >= 0) "+" else "−") + fmtWeight(round1(kotlin.math.abs(rate))) + " kg/sem",
+                color = Ink2, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(bottom = 6.dp),
             )
         }
-        if (last != null && goal != null) {
-            Text(if (goal > last.kg) "Subir a ${fmtWeight(goal)} kg" else if (goal < last.kg) "Bajar a ${fmtWeight(goal)} kg" else "¡Meta alcanzada! 🎉", color = Faint, style = MaterialTheme.typography.bodySmall)
-        }
+        Text(
+            when {
+                last == null -> "Toca para registrar tu peso"
+                goal == null -> "Último registro: ${fmtWeight(last.kg)} kg (${fmtDay(last.date).lowercase()}) · sin meta"
+                else -> {
+                    val gap = goal - (avgNow ?: last.kg)
+                    val toward = rate != null && rate != 0.0 && (gap > 0) == (rate > 0)
+                    if (kotlin.math.abs(gap) < 0.15) "¡Meta de ${fmtWeight(goal)} kg alcanzada! 🎉"
+                    else "Meta ${fmtWeight(goal)} kg · faltan ${fmtWeight(round1(kotlin.math.abs(gap)))} kg" +
+                        if (toward) " · ~${kotlin.math.ceil(kotlin.math.abs(gap / rate!!)).toInt()} semanas a este ritmo" else ""
+                }
+            }, color = Muted, style = MaterialTheme.typography.bodySmall,
+        )
         if (weights.isNotEmpty()) {
             Spacer(Modifier.height(10.dp))
-            WeightSpark(weights.takeLast(12).map { it.kg }, goal)
+            val recent = weights.filter { it.date > (weights.last().date - 42) }
+            WeightSpark(recent.map { it.date to it.kg }, movingAvg7(weights).filter { it.first > (weights.last().date - 42) }, goal)
         }
     }
 }
@@ -335,6 +351,7 @@ private fun ActiveWorkout(data: AppData, w: Workout) {
     var editSet by remember { mutableStateOf<Pair<Int, Int>?>(null) } // (entrada, serie); serie = -1 para nueva
     var confirmDiscard by remember { mutableStateOf(false) }
     var celebrate by remember { mutableIntStateOf(0) }
+    var noteFor by remember { mutableStateOf<String?>(null) }
     val bests = remember(data.workouts) { w.entries.map { it.exerciseId }.distinct().associateWith { bestsFor(data, it) } }
     val now = rememberNow()
     val mins = ((now - w.startedAt) / 60_000).toInt()
@@ -361,13 +378,19 @@ private fun ActiveWorkout(data: AppData, w: Workout) {
             w.entries.forEachIndexed { ei, e ->
                 item(key = "e$ei${e.exerciseId}") {
                     val prev = lastSetsFor(data, e.exerciseId)
-                    val target = suggestTarget(prev)
+                    val exercise = data.exercises.firstOrNull { it.id == e.exerciseId }
+                    val target = if ((exercise?.kind ?: 0) == 0) suggestTarget(prev) else null
                     val best = bests[e.exerciseId]
                     OdCard {
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             Column(Modifier.weight(1f)) {
                                 Text(exName(data, e.exerciseId), color = Ink, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.titleMedium)
-                                if (prev != null) Text("Última vez: " + prev.joinToString("  ") { "${fmtWeight(it.weight)}×${it.reps}" }, color = Faint, style = MaterialTheme.typography.bodySmall)
+                                if (prev != null) Text("Última vez: " + prev.joinToString("  ") { fmtSet(it) }, color = Faint, style = MaterialTheme.typography.bodySmall)
+                                Text(
+                                    exercise?.note?.ifBlank { null }?.let { "📌 $it" } ?: "+ Nota del ejercicio",
+                                    color = if (exercise?.note.isNullOrBlank()) Faint else Ink2, style = MaterialTheme.typography.bodySmall,
+                                    modifier = Modifier.padding(top = 4.dp).clip(RoundedCornerShape(50)).clickable { noteFor = e.exerciseId }.padding(vertical = 4.dp),
+                                )
                             }
                             IconButton(onClick = { upd { it.copy(entries = it.entries.filterIndexed { i, _ -> i != ei }) } }) { Icon(Icons.Filled.Close, "Quitar ejercicio", tint = Faint) }
                         }
@@ -379,18 +402,10 @@ private fun ActiveWorkout(data: AppData, w: Workout) {
                                 Text("Objetivo de hoy: ${fmtWeight(target.weight)} kg × ${target.reps}", color = Ink2, style = MaterialTheme.typography.bodyMedium)
                             }
                         }
+                        var n = 0
                         e.sets.forEachIndexed { si, s ->
-                            Row(
-                                Modifier.fillMaxWidth().padding(top = 8.dp).clip(RoundedCornerShape(50)).background(CardHigh)
-                                    .clickable { editSet = ei to si }.padding(horizontal = 18.dp, vertical = 12.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                Text("${si + 1}", color = Faint, modifier = Modifier.width(28.dp))
-                                Text("${fmtWeight(s.weight)} kg", fontWeight = FontWeight.SemiBold, color = Ink)
-                                if (isPr(s, best)) { Spacer(Modifier.width(10.dp)); Text("🏆 Récord", color = Accent, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold) }
-                                Spacer(Modifier.weight(1f))
-                                Text("× ${s.reps}", fontWeight = FontWeight.SemiBold, color = Ink2)
-                            }
+                            if (s.counts) n++
+                            SetRow(n, s, isPr(s, best)) { editSet = ei to si }
                         }
                         Spacer(Modifier.height(10.dp))
                         Row(
@@ -401,6 +416,10 @@ private fun ActiveWorkout(data: AppData, w: Workout) {
                 }
             }
             item { SecondaryButton("+ Agregar ejercicio") { addEx = true } }
+            item {
+                OutlinedTextField(w.note, { v -> upd { it.copy(note = v) } }, label = { Text("Nota de la sesión") },
+                    placeholder = { Text("Cómo te sentiste, qué cambiar…", color = Faint) }, shape = RoundedCornerShape(20.dp), maxLines = 3, modifier = Modifier.fillMaxWidth())
+            }
         }
         Row(Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             SecondaryButton("Descartar", Modifier.weight(1f), color = Bad) { confirmDiscard = true }
@@ -419,9 +438,10 @@ private fun ActiveWorkout(data: AppData, w: Workout) {
     editSet?.let { (ei, si) ->
         val entry = w.entries.getOrNull(ei)
         if (entry == null) { editSet = null; return@let }
-        val base = entry.sets.getOrNull(si) ?: entry.sets.lastOrNull()
-            ?: suggestTarget(lastSetsFor(data, entry.exerciseId))?.let { WorkSet(it.weight, it.reps) }
-        SetDialog(exName(data, entry.exerciseId), base, canDelete = si >= 0, onDismiss = { editSet = null },
+        val ex = data.exercises.firstOrNull { it.id == entry.exerciseId }
+        val base = entry.sets.getOrNull(si) ?: entry.sets.lastOrNull()?.copy(rpe = null)
+            ?: (if ((ex?.kind ?: 0) == 0) suggestTarget(lastSetsFor(data, entry.exerciseId))?.let { WorkSet(it.weight, it.reps) } else lastSetsFor(data, entry.exerciseId)?.lastOrNull())
+        SetDialog(ex, base, canDelete = si >= 0, onDismiss = { editSet = null },
             onDelete = { upd { it.copy(entries = it.entries.mapIndexed { i, en -> if (i == ei) en.copy(sets = en.sets.filterIndexed { j, _ -> j != si }) else en }) } },
         ) { set ->
             val prevBest = bests[entry.exerciseId]
@@ -432,33 +452,38 @@ private fun ActiveWorkout(data: AppData, w: Workout) {
             }) }
         }
     }
+    noteFor?.let { id -> ExerciseNoteDialog(data, id) { noteFor = null } }
     if (confirmDiscard) ConfirmDialog("Descartar entrenamiento", "Se perderán las series de este entrenamiento.", "Descartar", { confirmDiscard = false }) {
         Repo.update { it.copy(activeWorkout = null) }
     }
 }
 
-private fun Modifier.border1() = this.border(1.dp, Line, RoundedCornerShape(50))
-
 @Composable
-private fun SetDialog(title: String, base: WorkSet?, canDelete: Boolean, onDismiss: () -> Unit, onDelete: () -> Unit, onSave: (WorkSet) -> Unit) {
-    var weight by remember { mutableStateOf(base?.let { fmtWeight(it.weight) } ?: "") }
-    var reps by remember { mutableStateOf(base?.reps?.toString() ?: "") }
-    val w = weight.replace(',', '.').toDoubleOrNull()
-    val r = reps.toIntOrNull()
+private fun ExerciseNoteDialog(data: AppData, id: String, onDismiss: () -> Unit) {
+    val ex = data.exercises.firstOrNull { it.id == id } ?: run { onDismiss(); return }
+    var note by remember { mutableStateOf(ex.note) }
     OdDialog(
         onDismissRequest = onDismiss,
-        title = { Text(title) },
+        title = { Text(ex.name) },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                Stepper("Peso (kg)", weight, { weight = it }, step = 2.5, decimal = true)
-                Stepper("Repeticiones", reps, { reps = it }, step = 1.0, decimal = false)
-                if (canDelete) TextButton(onClick = { onDelete(); onDismiss() }, contentPadding = PaddingValues(0.dp)) { Text("Eliminar serie", color = Bad) }
+            Column {
+                Text("Una nota fija que verás cada vez que hagas este ejercicio.", color = Muted, style = MaterialTheme.typography.bodySmall)
+                Spacer(Modifier.height(10.dp))
+                OutlinedTextField(note, { note = it }, placeholder = { Text("Ej. asiento en 4, agarre cerrado", color = Faint) }, shape = RoundedCornerShape(18.dp), maxLines = 3, modifier = Modifier.fillMaxWidth())
             }
         },
-        confirmButton = { TextButton(enabled = w != null && r != null && r > 0, onClick = { onSave(WorkSet(w!!, r!!)); onDismiss() }) { Text("Guardar") } },
+        confirmButton = { TextButton(onClick = { Repo.update { d -> d.copy(exercises = d.exercises.map { if (it.id == id) it.copy(note = note.trim()) else it }) }; onDismiss() }) { Text("Guardar") } },
         dismissButton = { TextButton(onClick = onDismiss) { Text("Cancelar", color = Muted) } },
     )
 }
+
+/** Empieza un entrenamiento copiando ejercicios y series de una sesión anterior. */
+fun repeatWorkout(w: Workout) {
+    GymUi.minimized = false
+    Repo.update { d -> d.copy(activeWorkout = Workout(date = today(), name = w.name, entries = w.entries.map { e -> e.copy(sets = e.sets.map { it.copy(rpe = null) }) })) }
+}
+
+private fun Modifier.border1() = this.border(1.dp, Line, RoundedCornerShape(50))
 
 @Composable
 fun Stepper(label: String, value: String, onChange: (String) -> Unit, step: Double, decimal: Boolean) {
@@ -514,6 +539,7 @@ private fun ExercisePicker(data: AppData, onDismiss: () -> Unit, onPick: (String
 fun ExerciseDialog(onDismiss: () -> Unit, onCreated: (Exercise) -> Unit = {}) {
     var name by remember { mutableStateOf("") }
     var muscle by remember { mutableStateOf(MUSCLES.first()) }
+    var kind by remember { mutableIntStateOf(0) }
     OdDialog(
         onDismissRequest = onDismiss,
         title = { Text("Nuevo ejercicio") },
@@ -526,11 +552,15 @@ fun ExerciseDialog(onDismiss: () -> Unit, onCreated: (Exercise) -> Unit = {}) {
                         row.forEach { m -> ChoicePill(m, muscle == m, Modifier.weight(1f)) { muscle = m } }
                     }
                 }
+                Text("Se mide por", color = Muted, style = MaterialTheme.typography.labelLarge)
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    listOf("Peso × reps", "Tiempo", "Tiempo y km").forEachIndexed { i, k -> ChoicePill(k, kind == i, Modifier.weight(1f)) { kind = i } }
+                }
             }
         },
         confirmButton = {
             TextButton(enabled = name.isNotBlank(), onClick = {
-                val ex = Exercise(name = name.trim(), muscle = muscle)
+                val ex = Exercise(name = name.trim(), muscle = muscle, kind = kind)
                 Repo.update { it.copy(exercises = it.exercises + ex) }
                 onCreated(ex); onDismiss()
             }) { Text("Crear") }
@@ -583,11 +613,15 @@ private fun HistoryTab(data: AppData) {
             text = {
                 Column(Modifier.verticalScroll(rememberScrollState())) {
                     Text("${fmtLongDate(LocalDate.ofEpochDay(w.date))} · ${w.minutes} min", color = Muted)
+                    if (w.note.isNotBlank()) Text("“${w.note}”", color = Ink2, modifier = Modifier.padding(top = 8.dp))
                     w.entries.forEach { e ->
                         Spacer(Modifier.height(12.dp))
                         Text(exName(data, e.exerciseId), fontWeight = FontWeight.SemiBold, color = Ink)
-                        Text(e.sets.joinToString("   ") { "${fmtWeight(it.weight)} kg × ${it.reps}" }, color = Muted)
+                        Text(e.sets.joinToString("   ") { st -> (setTag(st.kind)?.let { "$it " } ?: "") + fmtSet(st) + (st.rpe?.let { " @$it" } ?: "") }, color = Muted)
                     }
+                    Spacer(Modifier.height(16.dp))
+                    if (data.activeWorkout == null) PrimaryButton("Repetir esta sesión", icon = R.drawable.ic_play) { repeatWorkout(w); open = null }
+                    else Text("Termina el entrenamiento en curso para poder repetir esta sesión.", color = Faint, style = MaterialTheme.typography.bodySmall)
                 }
             },
             confirmButton = { TextButton(onClick = { open = null }) { Text("Cerrar") } },
@@ -645,14 +679,19 @@ private fun ProgressTab(data: AppData) {
     var selected by rememberSaveable { mutableStateOf(withData.first()) }
     if (selected !in withData) selected = withData.first()
 
+    val kind = data.exercises.firstOrNull { it.id == selected }?.kind ?: 0
+    fun metric(st: WorkSet) = when (kind) { 1 -> (st.seconds ?: 0).toDouble(); 2 -> st.km ?: 0.0; else -> st.weight }
+    val unit = when (kind) { 1 -> "s"; 2 -> "km"; else -> "kg" }
     val points = data.workouts.sortedBy { it.startedAt }.mapNotNull { w ->
-        val sets = w.entries.filter { it.exerciseId == selected }.flatMap { it.sets }
-        if (sets.isEmpty()) null else Triple(w.date, sets.maxOf { it.weight }, sets)
+        val sets = w.entries.filter { it.exerciseId == selected }.flatMap { it.sets }.filter { it.counts }
+        if (sets.isEmpty()) null else Triple(w.date, sets.maxOf { metric(it) }, sets)
     }
+    if (points.isEmpty()) { EmptyState("📈", "Solo hay calentamientos", "Registra series normales para ver tu progreso."); return }
     val allSets = points.flatMap { it.third }
-    val best = allSets.maxByOrNull { it.weight }!!
+    val best = allSets.maxBy { metric(it) }
     val best1rm = allSets.maxOf { oneRm(it) }
     val diff = round1(points.last().second - points.first().second)
+    fun fmtM(v: Double) = if (kind == 1) fmtSecs(v.toInt()) else fmtWeight(round1(v))
 
     Column(Modifier.verticalScroll(rememberScrollState()).padding(bottom = 120.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         LazyRow(contentPadding = PaddingValues(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -660,18 +699,30 @@ private fun ProgressTab(data: AppData) {
         }
         Column(Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                StatTile(R.drawable.ic_trophy, fmtWeight(best.weight), "récord × ${best.reps}", Modifier.weight(1f))
-                StatTile(R.drawable.ic_bolt, fmtWeight(round1(best1rm)), "1RM estimado", Modifier.weight(1f))
+                when (kind) {
+                    0 -> {
+                        StatTile(R.drawable.ic_trophy, fmtWeight(best.weight), "récord × ${best.reps}", Modifier.weight(1f))
+                        StatTile(R.drawable.ic_bolt, fmtWeight(round1(best1rm)), "1RM estimado", Modifier.weight(1f))
+                    }
+                    1 -> {
+                        StatTile(R.drawable.ic_trophy, fmtSecs(best.seconds ?: 0), "récord", Modifier.weight(1f))
+                        StatTile(R.drawable.ic_clock, fmtSecs(allSets.sumOf { it.seconds ?: 0 }), "tiempo total", Modifier.weight(1f))
+                    }
+                    else -> {
+                        StatTile(R.drawable.ic_trophy, fmtWeight(round1(best.km ?: 0.0)), "km récord", Modifier.weight(1f))
+                        StatTile(R.drawable.ic_bolt, fmtWeight(round1(allSets.sumOf { it.km ?: 0.0 })), "km totales", Modifier.weight(1f))
+                    }
+                }
             }
             Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                StatTile(R.drawable.ic_nav_gym, (if (diff >= 0) "+" else "") + fmtWeight(diff), "kg de cambio", Modifier.weight(1f))
+                StatTile(R.drawable.ic_nav_gym, (if (diff >= 0) "+" else "−") + fmtM(kotlin.math.abs(diff)), "$unit de cambio", Modifier.weight(1f))
                 StatTile(R.drawable.ic_calendar, "${points.size}", "sesiones", Modifier.weight(1f))
             }
             OdCard {
-                CardLabel("Peso máximo por sesión", sub = "kg · toca un punto")
+                CardLabel(when (kind) { 1 -> "Mejor tiempo por sesión"; 2 -> "Distancia máxima por sesión"; else -> "Peso máximo por sesión" }, sub = "$unit · toca un punto")
                 Spacer(Modifier.height(12.dp))
                 if (points.size < 2) Text("Necesitas al menos 2 sesiones para ver la gráfica.", color = Muted)
-                else LineChart(points.map { it.first to it.second })
+                else LineChart(points.map { it.first to it.second }, unit, ::fmtM)
             }
             OdCard {
                 CardLabel("Últimas sesiones")
@@ -679,7 +730,7 @@ private fun ProgressTab(data: AppData) {
                 points.takeLast(6).reversed().forEach { (date, _, sets) ->
                     Row(Modifier.padding(vertical = 6.dp)) {
                         Text(fmtDay(date), color = Muted, modifier = Modifier.width(96.dp), style = MaterialTheme.typography.bodyMedium)
-                        Text(sets.joinToString("  ") { "${fmtWeight(it.weight)}×${it.reps}" }, color = Ink, style = MaterialTheme.typography.bodyMedium)
+                        Text(sets.joinToString("  ") { fmtSet(it) }, color = Ink, style = MaterialTheme.typography.bodyMedium)
                     }
                 }
             }

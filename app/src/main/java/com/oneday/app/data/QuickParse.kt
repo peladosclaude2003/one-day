@@ -10,6 +10,7 @@ data class Parsed(
     val time: Int? = null,
     val priority: Int? = null,
     val daily: Boolean = false,
+    val area: String? = null,
 )
 
 /**
@@ -27,7 +28,7 @@ object QuickParse {
         when (it) { 'á' -> 'a'; 'é' -> 'e'; 'í' -> 'i'; 'ó' -> 'o'; 'ú', 'ü' -> 'u'; 'ñ' -> 'n'; else -> it }
     }.joinToString("")
 
-    fun parse(input: String, now: LocalDate = LocalDate.now(), nowTime: LocalTime = LocalTime.now()): Parsed {
+    fun parse(input: String, now: LocalDate = LocalDate.now(), nowTime: LocalTime = LocalTime.now(), areas: List<String> = emptyList()): Parsed {
         val n = norm(input)
         val remove = mutableListOf<IntRange>()
         fun taken(r: IntRange) = remove.any { it.first <= r.last && r.first <= it.last }
@@ -41,6 +42,13 @@ object QuickParse {
         grab(Regex("$b(!+alta|!a|!!!?|urgente|!+media|!m|!+baja|!b)$e|(?<=\\s|^)(!!!?)(?=\\s|$)")) { m ->
             priority = when (m.value.trim('!').ifEmpty { "a" }) { "alta", "a", "urgente" -> 2; "media", "m" -> 1; "baja", "b" -> 0; else -> 2 }
             true
+        }
+
+        // Área: #trabajo, #casa…
+        var area: String? = null
+        grab(Regex("#([\\p{L}\\d]+)")) { m ->
+            val found = areas.firstOrNull { norm(it).replace(" ", "") == m.groupValues[1] }
+            if (found != null && area == null) { area = found; true } else false
         }
 
         var daily = false
@@ -111,6 +119,6 @@ object QuickParse {
         while (words.isNotEmpty() && norm(words.last()) in filler) words = words.dropLast(1)
         while (words.size > 1 && norm(words.first()) in setOf("el", "la")) words = words.drop(1)
         title = words.joinToString(" ").replaceFirstChar { it.uppercase() }
-        return Parsed(title, date, time, priority, daily)
+        return Parsed(title, date, time, priority, daily, area)
     }
 }

@@ -77,23 +77,44 @@ fun StreaksScreen(data: AppData) {
     if (creatingHabit) HabitDialog(null) { creatingHabit = false }
     editingHabit?.let { h -> HabitDialog(h) { editingHabit = null } }
     cravingsOf?.let { s -> CravingSheet(s) { cravingsOf = null } }
-    resetting?.let { s ->
-        OdDialog(
-            onDismissRequest = { resetting = null },
-            title = { Text("¿Reiniciar racha?") },
-            text = { Text("No pasa nada, recaer es parte del proceso. Tu récord de ${maxOf(s.bestDays, streakDays(s))} día(s) se guarda y empiezas de nuevo hoy.") },
-            confirmButton = {
-                TextButton(onClick = {
-                    Repo.update { d -> d.copy(streaks = d.streaks.map {
-                        if (it.id == s.id) it.copy(bestDays = maxOf(it.bestDays, streakDays(it)), start = System.currentTimeMillis(), resets = it.resets + 1) else it
-                    }) }
-                    resetting = null
-                }) { Text("Reiniciar", color = Bad) }
-            },
-            dismissButton = { TextButton(onClick = { resetting = null }) { Text("Cancelar", color = Muted) } },
-        )
-    }
+    resetting?.let { s -> RelapseDialog(s) { resetting = null } }
 }
+
+/** Reiniciar una racha registrando qué la provocó. */
+@Composable
+fun RelapseDialog(s: Streak, onDismiss: () -> Unit) {
+    var trigger by remember { mutableStateOf<String?>(null) }
+    var note by remember { mutableStateOf("") }
+    OdDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("¿Reiniciar racha?") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("No pasa nada, recaer es parte del proceso. Tu récord de ${maxOf(s.bestDays, streakDays(s))} día(s) se guarda y empiezas de nuevo hoy.")
+                Text("¿Qué la provocó?", color = Muted, style = MaterialTheme.typography.labelLarge)
+                TRIGGERS.chunked(2).forEach { row ->
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        row.forEach { tr -> ChoicePill(tr, trigger == tr, Modifier.weight(1f)) { trigger = tr } }
+                    }
+                }
+                OutlinedTextField(note, { note = it }, label = { Text("Nota (opcional)") }, singleLine = true, shape = RoundedCornerShape(18.dp), modifier = Modifier.fillMaxWidth())
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = {
+                val days = streakDays(s)
+                Repo.update { d -> d.copy(
+                    streaks = d.streaks.map { if (it.id == s.id) it.copy(bestDays = maxOf(it.bestDays, days), start = System.currentTimeMillis(), resets = it.resets + 1) else it },
+                    relapses = d.relapses + Relapse(s.id, System.currentTimeMillis(), trigger ?: "Otro", note.trim(), days),
+                ) }
+                onDismiss()
+            }) { Text("Reiniciar", color = Bad) }
+        },
+        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancelar", color = Muted) } },
+    )
+}
+
+fun addHabitAmount(h: Habit, delta: Int) = Repo.update { d -> d.copy(habits = d.habits.map { if (it.id == h.id) it.addAmount(delta) else it }) }
 
 fun toggleHabitToday(h: Habit) = Repo.update { d ->
     val t = today()
@@ -148,7 +169,29 @@ fun HabitCard(h: Habit, onEdit: () -> Unit) {
                 }
             }
             Spacer(Modifier.height(16.dp))
-            if (done) SecondaryButton("✓ Hecho hoy · deshacer", color = Ink2) { Fx.tick(); toggleHabitToday(h) }
+            if (h.target != null) {
+                val n = h.countToday()
+                Row(verticalAlignment = Alignment.Bottom) {
+                    Text("Hoy", color = Muted, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(bottom = 3.dp))
+                    Spacer(Modifier.width(8.dp))
+                    RollingText("$n", color = Ink, fontSize = 24.sp, fontWeight = FontWeight.Bold)
+                    Text(" / ${h.target} ${h.unit}", color = Muted, modifier = Modifier.padding(bottom = 3.dp))
+                    Spacer(Modifier.weight(1f))
+                    if (done) Text("✓ Meta cumplida", color = Good, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(bottom = 3.dp))
+                }
+                Spacer(Modifier.height(8.dp))
+                ThinBar((n.toFloat() / h.target).coerceIn(0f, 1f))
+                Spacer(Modifier.height(14.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                    CircleButton("Restar", onClick = { Fx.tick(); addHabitAmount(h, -h.step) }) { Text("−", color = Ink, fontSize = 22.sp) }
+                    PrimaryButton("Sumar ${h.step}", Modifier.weight(1f)) {
+                        val wasDone = done
+                        addHabitAmount(h, h.step)
+                        val after = h.addAmount(h.step)
+                        if (!wasDone && t in after.doneDays) { Fx.success(); if (habitStreak(after).toLong() in MILESTONES) celebrate++ } else Fx.tick()
+                    }
+                }
+            } else if (done) SecondaryButton("✓ Hecho hoy · deshacer", color = Ink2) { Fx.tick(); toggleHabitToday(h) }
             else PrimaryButton("Marcar hecho hoy") {
                 Fx.success(); toggleHabitToday(h)
                 if (habitStreak(h.copy(doneDays = h.doneDays + t)).toLong() in MILESTONES) celebrate++
@@ -165,6 +208,10 @@ fun HabitDialog(initial: Habit?, onDismiss: () -> Unit) {
     var name by remember { mutableStateOf(initial?.name ?: "") }
     var emoji by remember { mutableStateOf(initial?.emoji ?: "💧") }
     var remind by remember { mutableStateOf(initial?.remindAt) }
+    var withAmount by remember { mutableStateOf(initial?.target != null) }
+    var target by remember { mutableStateOf((initial?.target ?: 8).toString()) }
+    var unit by remember { mutableStateOf(initial?.unit?.ifEmpty { null } ?: "vasos") }
+    var step by remember { mutableStateOf((initial?.step ?: 1).toString()) }
     var pickTime by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
     OdDialog(
@@ -175,6 +222,18 @@ fun HabitDialog(initial: Habit?, onDismiss: () -> Unit) {
                 OutlinedTextField(name, { name = it }, label = { Text("¿Qué quieres hacer cada día?") }, singleLine = true, shape = RoundedCornerShape(18.dp), modifier = Modifier.fillMaxWidth())
                 Text("Ícono", color = Muted, style = MaterialTheme.typography.labelLarge)
                 EmojiGrid(HABIT_EMOJIS, emoji) { emoji = it }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text("Con cantidad", color = Ink)
+                        Text("Ej. 8 vasos, 20 minutos, 10000 pasos", color = Muted, style = MaterialTheme.typography.bodySmall)
+                    }
+                    Switch(checked = withAmount, onCheckedChange = { withAmount = it })
+                }
+                if (withAmount) {
+                    Stepper("Meta diaria", target, { target = it }, step = 1.0, decimal = false)
+                    OutlinedTextField(unit, { unit = it }, label = { Text("Unidad") }, singleLine = true, shape = RoundedCornerShape(18.dp), modifier = Modifier.fillMaxWidth())
+                    Stepper("Cada toque suma", step, { step = it }, step = 1.0, decimal = false)
+                }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Column(Modifier.weight(1f)) {
                         Text("Recordatorio diario", color = Ink)
@@ -188,7 +247,9 @@ fun HabitDialog(initial: Habit?, onDismiss: () -> Unit) {
         },
         confirmButton = {
             TextButton(enabled = name.isNotBlank(), onClick = {
-                val h = (initial ?: Habit(name = "", createdDay = today())).copy(name = name.trim(), emoji = emoji, remindAt = remind)
+                val goal = target.toIntOrNull()?.takeIf { withAmount && it > 0 }
+                val h = (initial ?: Habit(name = "", createdDay = today())).copy(name = name.trim(), emoji = emoji, remindAt = remind,
+                    target = goal, unit = if (goal != null) unit.trim() else "", step = step.toIntOrNull()?.coerceAtLeast(1) ?: 1)
                 Repo.update { d -> d.copy(habits = if (initial == null) d.habits + h else d.habits.map { if (it.id == h.id) h else it }) }
                 onDismiss()
             }) { Text("Guardar") }
@@ -233,7 +294,8 @@ fun StreakCard(s: Streak, now: Long, cravings: Int, onEdit: () -> Unit, onReset:
             Spacer(Modifier.width(14.dp))
             Column(Modifier.weight(1f)) {
                 Text("Sin ${s.name.lowercase()}", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, color = Ink)
-                Text(motivation(days), color = Faint, style = MaterialTheme.typography.bodySmall)
+                if (s.reason.isNotBlank()) Text("“${s.reason}”", color = Ink2, style = MaterialTheme.typography.bodySmall, fontStyle = androidx.compose.ui.text.font.FontStyle.Italic)
+                else Text(motivation(days), color = Faint, style = MaterialTheme.typography.bodySmall)
             }
             IconButton(onClick = onEdit) { Icon(Icons.Filled.Edit, "Editar", tint = Faint) }
         }
@@ -281,6 +343,7 @@ private val EMOJIS = listOf("🚭", "🍺", "🍬", "📱", "🎮", "☕", "🍔
 fun StreakDialog(initial: Streak?, onDismiss: () -> Unit) {
     var name by remember { mutableStateOf(initial?.name ?: "") }
     var emoji by remember { mutableStateOf(initial?.emoji ?: "🚭") }
+    var reason by remember { mutableStateOf(initial?.reason ?: "") }
     var startDay by remember { mutableStateOf(initial?.start?.let { millisToEpochDay(it) } ?: today()) }
     var pickDate by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
@@ -291,6 +354,8 @@ fun StreakDialog(initial: Streak?, onDismiss: () -> Unit) {
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 OutlinedTextField(name, { name = it }, label = { Text("¿Qué quieres dejar? (ej. Fumar)") }, singleLine = true, shape = RoundedCornerShape(18.dp), modifier = Modifier.fillMaxWidth())
+                OutlinedTextField(reason, { reason = it }, label = { Text("Tu motivo (opcional)") }, placeholder = { Text("Ej. por mi hija", color = Faint) },
+                    singleLine = true, shape = RoundedCornerShape(18.dp), modifier = Modifier.fillMaxWidth())
                 Text("Ícono", color = Muted, style = MaterialTheme.typography.labelLarge)
                 EmojiGrid(EMOJIS, emoji) { emoji = it }
                 Text("¿Desde cuándo?", color = Muted, style = MaterialTheme.typography.labelLarge)
@@ -304,7 +369,7 @@ fun StreakDialog(initial: Streak?, onDismiss: () -> Unit) {
                 // Si la fecha elegida es hoy, cuenta desde este momento; si es otro día, desde la hora actual de ese día.
                 val start = if (startDay == today()) (if (initial != null && millisToEpochDay(initial.start) == today()) initial.start else now)
                     else now - (today() - startDay) * DAY_MS
-                val s = (initial ?: Streak(name = "", start = start)).copy(name = name.trim(), emoji = emoji, start = start)
+                val s = (initial ?: Streak(name = "", start = start)).copy(name = name.trim(), emoji = emoji, start = start, reason = reason.trim())
                 Repo.update { d -> d.copy(streaks = if (initial == null) d.streaks + s else d.streaks.map { if (it.id == s.id) s else it }) }
                 onDismiss()
             }) { Text("Guardar") }

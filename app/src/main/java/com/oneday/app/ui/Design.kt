@@ -117,11 +117,31 @@ fun OneDayTheme(content: @Composable () -> Unit) = MaterialTheme(
     content = content,
 )
 
+data class Undo(val text: String, val action: () -> Unit, val id: Long)
+
+/** Barra flotante con "Deshacer". */
+@Composable
+fun UndoBar(modifier: Modifier = Modifier) {
+    val u = UiState.undo ?: return
+    LaunchedEffect(u.id) { kotlinx.coroutines.delay(4000); if (UiState.undo?.id == u.id) UiState.undo = null }
+    Row(
+        modifier.padding(horizontal = 16.dp).fillMaxWidth().clip(RoundedCornerShape(50)).background(Glass)
+            .border(1.dp, Color.White.copy(alpha = 0.07f), RoundedCornerShape(50)).padding(start = 20.dp, end = 6.dp, top = 6.dp, bottom = 6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Text(u.text, color = Ink, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis, style = MaterialTheme.typography.bodyMedium)
+        TextButton(onClick = { u.action(); UiState.undo = null; Fx.tick() }) { Text("Deshacer", color = Accent, fontWeight = FontWeight.SemiBold) }
+    }
+}
+
 /** Estado global de la interfaz: desenfoque de fondo y menú visible. */
 object UiState {
     var blurCount by mutableIntStateOf(0)
     var hideNav by mutableStateOf(false)
     var sosStreak by mutableStateOf<String?>(null)
+    /** Aviso con "Deshacer" que se muestra 4 segundos. */
+    var undo by mutableStateOf<Undo?>(null)
+    fun showUndo(text: String, action: () -> Unit) { undo = Undo(text, action, System.nanoTime()) }
 }
 
 @Composable

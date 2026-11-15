@@ -4,6 +4,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -41,6 +42,7 @@ val taskOrder = compareBy<Task>({ it.date ?: Long.MAX_VALUE }, { it.time ?: Int.
 @Composable
 fun TasksScreen(data: AppData) {
     var filter by rememberSaveable { mutableIntStateOf(0) }
+    var area by rememberSaveable { mutableStateOf<String?>(null) }
     var editing by remember { mutableStateOf<Task?>(null) }
     var creating by remember { mutableStateOf(false) }
     val t = today()
@@ -51,9 +53,16 @@ fun TasksScreen(data: AppData) {
             CircleButton("Nuevo pendiente", accent = true, onClick = { creating = true }) { Icon(Icons.Filled.Add, null, tint = Bg) }
         }
         Segmented(listOf("Por hacer", "Hoy", "Hechos"), filter, { filter = it }, Modifier.padding(horizontal = 16.dp))
+        // Áreas: píldoras para filtrar, con cuántos pendientes tiene cada una
+        val open = data.tasks.filter { !it.done }
+        LazyRow(contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            item { ChoicePill("Todas · ${open.size}", area == null) { area = null } }
+            items(data.settings.areas) { a -> ChoicePill("$a · ${open.count { it.area == a }}", area == a) { area = if (area == a) null else a } }
+        }
+        val tasks = if (area == null) data.tasks else data.tasks.filter { it.area == area }
         val groups: List<Pair<String, List<Task>>> = when (filter) {
             0 -> {
-                val open = data.tasks.filter { !it.done }.sortedWith(taskOrder)
+                val open = tasks.filter { !it.done }.sortedWith(taskOrder)
                 listOf(
                     "Atrasados" to open.filter { it.date != null && it.date < t },
                     "Hoy" to open.filter { it.date == t },
@@ -61,8 +70,8 @@ fun TasksScreen(data: AppData) {
                     "Sin fecha" to open.filter { it.date == null }.sortedByDescending { it.priority },
                 )
             }
-            1 -> listOf("Hoy" to data.tasks.filter { it.date == t }.sortedWith(compareBy<Task> { it.done }.then(taskOrder)))
-            else -> listOf("Completados" to data.tasks.filter { it.done }.sortedByDescending { it.doneAt ?: 0 })
+            1 -> listOf("Hoy" to tasks.filter { it.date == t }.sortedWith(compareBy<Task> { it.done }.then(taskOrder)))
+            else -> listOf("Completados" to tasks.filter { it.done }.sortedByDescending { it.doneAt ?: 0 })
         }.filter { it.second.isNotEmpty() }
 
         if (groups.isEmpty()) {
@@ -79,7 +88,7 @@ fun TasksScreen(data: AppData) {
                         letterSpacing = 1.2.sp, modifier = Modifier.padding(top = 18.dp, bottom = 8.dp, start = 8.dp))
                 }
                 items(list, key = { it.id }) { task ->
-                    TaskRow(task, showDate = filter != 1, onToggle = { toggleTask(task) }, onClick = { editing = task })
+                    SwipeTask(task) { TaskRow(task, showDate = filter != 1, onToggle = { toggleTask(task) }, onClick = { editing = task }) }
                     Spacer(Modifier.height(8.dp))
                 }
             }
@@ -94,6 +103,52 @@ fun TasksScreen(data: AppData) {
     }
     if (creating) QuickAddSheet(defaultDate = if (filter == 1) t else null) { creating = false }
     editing?.let { TaskDialog(it, isNew = false, onDismiss = { editing = null }) }
+}
+
+/** Marca hecho con "Deshacer". */
+fun completeWithUndo(t: Task) {
+    toggleTask(t)
+    UiState.showUndo(if (t.done) "Pendiente reabierto" else "Hecho: ${t.title}") { saveTask(t) }
+}
+
+/** Pasa a mañana con "Deshacer". */
+fun postponeWithUndo(t: Task) {
+    saveTask(t.copy(date = today() + 1))
+    UiState.showUndo("Pasado a mañana: ${t.title}") { saveTask(t) }
+}
+
+/** Deslizar a la derecha = hecho · a la izquierda = mañana. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun SwipeTask(task: Task, content: @Composable () -> Unit) {
+    val state = rememberSwipeToDismissBoxState(
+        confirmValueChange = { v ->
+            when (v) {
+                SwipeToDismissBoxValue.StartToEnd -> { Fx.success(); completeWithUndo(task) }
+                SwipeToDismissBoxValue.EndToStart -> { Fx.tick(); postponeWithUndo(task) }
+                else -> {}
+            }
+            false // la fila regresa a su lugar; la lista se actualiza sola
+        },
+        positionalThreshold = { it * 0.35f },
+    )
+    SwipeToDismissBox(
+        state = state,
+        enableDismissFromEndToStart = !task.done,
+        backgroundContent = {
+            val dir = state.dismissDirection
+            val right = dir == SwipeToDismissBoxValue.StartToEnd
+            Box(
+                Modifier.fillMaxSize().clip(RoundedCornerShape(24.dp)).background(if (right) Ink2 else CardHigh).padding(horizontal = 24.dp),
+                contentAlignment = if (right) Alignment.CenterStart else Alignment.CenterEnd,
+            ) {
+                if (dir == SwipeToDismissBoxValue.StartToEnd) Row(verticalAlignment = Alignment.CenterVertically) {
+                    OdIcon(R.drawable.ic_check, Bg, 22.dp); Spacer(Modifier.width(8.dp)); Text(if (task.done) "Reabrir" else "Hecho", color = Bg, fontWeight = FontWeight.SemiBold)
+                }
+                if (dir == SwipeToDismissBoxValue.EndToStart) Text("Mañana →", color = Ink, fontWeight = FontWeight.SemiBold)
+            }
+        },
+    ) { content() }
 }
 
 @Composable
@@ -111,6 +166,7 @@ fun TaskRow(task: Task, showDate: Boolean = true, onToggle: () -> Unit, onClick:
                 color = if (task.done) Faint else Ink, fontWeight = FontWeight.Medium,
             )
             val parts = buildList {
+                task.area?.let { add(it) }
                 if (showDate && task.date != null) add(fmtDay(task.date))
                 if (task.time != null) add(fmtTime(task.time))
                 if (task.notes.isNotBlank()) add(task.notes)
@@ -130,6 +186,9 @@ fun TaskDialog(initial: Task, isNew: Boolean, onDismiss: () -> Unit) {
     var time by remember { mutableStateOf(initial.time) }
     var priority by remember { mutableIntStateOf(initial.priority) }
     var remind by remember { mutableStateOf(initial.remind) }
+    var area by remember { mutableStateOf(initial.area) }
+    var newArea by remember { mutableStateOf<String?>(null) }
+    val areas = Repo.data.settings.areas
     var pickDate by remember { mutableStateOf(false) }
     var pickTime by remember { mutableStateOf(false) }
     var confirmDelete by remember { mutableStateOf(false) }
@@ -147,6 +206,26 @@ fun TaskDialog(initial: Task, isNew: Boolean, onDismiss: () -> Unit) {
                 }
                 if (date != null || time != null) {
                     TextButton(onClick = { date = null; time = null; remind = false }, contentPadding = PaddingValues(0.dp)) { Text("Quitar fecha y hora", color = Muted) }
+                }
+                Text("Área", style = MaterialTheme.typography.labelLarge, color = Muted)
+                (areas + "+ Nueva").chunked(3).forEach { row ->
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        row.forEach { a ->
+                            if (a == "+ Nueva") ChoicePill(a, false, Modifier.weight(1f)) { newArea = "" }
+                            else ChoicePill(a, area == a, Modifier.weight(1f)) { area = if (area == a) null else a }
+                        }
+                        repeat(3 - row.size) { Spacer(Modifier.weight(1f)) }
+                    }
+                }
+                newArea?.let { na ->
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        OutlinedTextField(na, { newArea = it }, label = { Text("Nueva área") }, singleLine = true, shape = RoundedCornerShape(18.dp), modifier = Modifier.weight(1f))
+                        TextButton(enabled = na.isNotBlank(), onClick = {
+                            val name = na.trim().replaceFirstChar { it.uppercase() }
+                            if (name !in areas) Repo.update { it.copy(settings = it.settings.copy(areas = it.settings.areas + name)) }
+                            area = name; newArea = null
+                        }) { Text("Agregar") }
+                    }
                 }
                 Text("Prioridad", style = MaterialTheme.typography.labelLarge, color = Muted)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -166,7 +245,7 @@ fun TaskDialog(initial: Task, isNew: Boolean, onDismiss: () -> Unit) {
         },
         confirmButton = {
             TextButton(enabled = title.isNotBlank(), onClick = {
-                saveTask(initial.copy(title = title.trim(), notes = notes.trim(), date = date, time = time, priority = priority,
+                saveTask(initial.copy(title = title.trim(), notes = notes.trim(), date = date, time = time, priority = priority, area = area,
                     remind = remind && date != null && time != null))
                 onDismiss()
             }) { Text("Guardar") }

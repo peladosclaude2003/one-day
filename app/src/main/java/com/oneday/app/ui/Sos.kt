@@ -55,6 +55,10 @@ fun SosOverlay(streakId: String, onClose: () -> Unit) {
     ) {
         Column(Modifier.fillMaxSize().padding(24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
             Text("SIN ${streak.name.uppercase()}", color = Muted, style = MaterialTheme.typography.labelLarge, letterSpacing = 1.5.sp, modifier = Modifier.padding(top = 16.dp))
+            if (streak.reason.isNotBlank()) {
+                Spacer(Modifier.height(20.dp))
+                Text("“${streak.reason}”", color = Ink, fontSize = 26.sp, fontWeight = FontWeight.SemiBold, textAlign = TextAlign.Center, lineHeight = 32.sp)
+            }
             Spacer(Modifier.weight(1f))
             when (phase) {
                 0 -> {
@@ -108,13 +112,14 @@ fun SosOverlay(streakId: String, onClose: () -> Unit) {
 fun CravingSheet(streak: Streak, onDismiss: () -> Unit) {
     val list = Repo.data.cravings.filter { it.streakId == streak.id }
     GlassSheet(onDismiss) {
-        Text("ANTOJOS · SIN ${streak.name.uppercase()}", color = Muted, style = MaterialTheme.typography.labelLarge, letterSpacing = 1.5.sp)
+        Text("PATRONES · SIN ${streak.name.uppercase()}", color = Muted, style = MaterialTheme.typography.labelLarge, letterSpacing = 1.5.sp)
         Spacer(Modifier.height(12.dp))
         Text("${list.size}", fontSize = 64.sp, fontWeight = FontWeight.Bold, color = Ink)
         Text("antojos superados", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold, color = Ink)
         if (list.isEmpty()) {
             Spacer(Modifier.height(10.dp))
             Text("Cuando sientas ganas, toca \"Tengo ganas\" y respira 60 segundos. Aquí verás a qué horas te pasa más.", color = Ink2)
+            RelapsePatterns(streak)
             return@GlassSheet
         }
         val buckets = cravingBuckets(list)
@@ -127,11 +132,38 @@ fun CravingSheet(streak: Streak, onDismiss: () -> Unit) {
             Spacer(Modifier.height(12.dp))
             Bars(buckets, listOf("0", "3", "6", "9", "12", "15", "18", "21"), highlight = peak)
         }
+        RelapsePatterns(streak)
         Spacer(Modifier.height(12.dp))
         Text(
             if (list.size >= 5) "Puedes activar en Ajustes un aviso 30 minutos antes de tu hora difícil."
             else "Con ${5 - list.size} registro(s) más podrás activar un aviso antes de tu hora difícil.",
             color = Muted, style = MaterialTheme.typography.bodySmall,
         )
+    }
+}
+
+
+/** Recaídas por disparador: el más frecuente en naranja. */
+@Composable
+fun RelapsePatterns(streak: Streak) {
+    val rel = Repo.data.relapses.filter { it.streakId == streak.id }
+    if (rel.isEmpty()) return
+    val byTrigger = rel.groupingBy { it.trigger }.eachCount().entries.sortedByDescending { it.value }
+    val top = byTrigger.first().key
+    val max = byTrigger.first().value
+    Spacer(Modifier.height(16.dp))
+    Column(Modifier.fillMaxWidth().clip(androidx.compose.foundation.shape.RoundedCornerShape(24.dp)).background(Color.White.copy(alpha = 0.06f)).padding(18.dp)) {
+        CardLabel("Recaídas por disparador", sub = "${rel.size} en total · la más común: ${top.lowercase()}")
+        Spacer(Modifier.height(10.dp))
+        byTrigger.forEach { (tr, n) ->
+            Row(Modifier.fillMaxWidth().padding(vertical = 5.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(tr, color = Ink, modifier = Modifier.width(130.dp), style = MaterialTheme.typography.bodyMedium)
+                Box(Modifier.weight(1f).height(6.dp).clip(CircleShape).background(CardHigh)) {
+                    Box(Modifier.fillMaxWidth(n / max.toFloat()).fillMaxHeight().clip(CircleShape).background(if (tr == top) Accent else Ink2))
+                }
+                Spacer(Modifier.width(10.dp))
+                Text("$n", color = if (tr == top) Accent else Muted, style = MaterialTheme.typography.bodyMedium)
+            }
+        }
     }
 }

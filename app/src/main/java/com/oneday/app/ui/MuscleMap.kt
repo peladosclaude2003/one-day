@@ -33,7 +33,7 @@ fun AppData.weeklySetsByMuscle(): Map<String, Int> {
     val muscleOf = exercises.associate { it.id to it.muscle }
     val out = MAP_MUSCLES.associateWith { 0 }.toMutableMap()
     workouts.filter { it.date >= monday }.forEach { w ->
-        w.entries.forEach { e -> muscleOf[e.exerciseId]?.let { m -> if (m in out) out[m] = out[m]!! + e.sets.size } }
+        w.entries.forEach { e -> muscleOf[e.exerciseId]?.let { m -> if (m in out) out[m] = out[m]!! + e.sets.count { it.counts } } }
     }
     return out
 }

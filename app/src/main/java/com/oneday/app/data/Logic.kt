@@ -38,7 +38,14 @@ fun fmtDay(epochDay: Long): String {
 fun fmtLongDate(d: LocalDate): String =
     d.format(DateTimeFormatter.ofPattern("EEEE, d 'de' MMMM", ES)).replaceFirstChar { it.uppercase() }
 
-fun fmtWeight(w: Double): String = if (w % 1.0 == 0.0) w.toInt().toString() else "%.1f".format(w)
+fun fmtWeight(w: Double): String {
+    val r2 = Math.round(w * 100) / 100.0
+    return when {
+        r2 % 1.0 == 0.0 -> r2.toLong().toString()
+        Math.round(r2 * 10) / 10.0 == r2 -> "%.1f".format(java.util.Locale.US, r2)
+        else -> "%.2f".format(java.util.Locale.US, r2)
+    }
+}
 
 fun millisToEpochDay(ms: Long): Long = Instant.ofEpochMilli(ms).atZone(ZoneId.systemDefault()).toLocalDate().toEpochDay()
 
@@ -46,15 +53,17 @@ fun millisToEpochDay(ms: Long): Long = Instant.ofEpochMilli(ms).atZone(ZoneId.sy
 fun atMillis(epochDay: Long, minutes: Int): Long =
     LocalDate.ofEpochDay(epochDay).atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli() + minutes * 60_000L
 
-fun Workout.volume(): Double = entries.sumOf { e -> e.sets.sumOf { it.weight * it.reps } }
-fun Workout.setCount(): Int = entries.sumOf { it.sets.size }
+/** Series que cuentan (el calentamiento no suma a volumen, repeticiones ni récords). */
+val WorkSet.counts get() = kind != SET_WARMUP
+fun Workout.volume(): Double = entries.sumOf { e -> e.sets.filter { it.counts }.sumOf { it.weight * it.reps } }
+fun Workout.setCount(): Int = entries.sumOf { e -> e.sets.count { it.counts } }
 
 /** 1RM estimado (fórmula de Epley). */
 fun oneRm(s: WorkSet): Double = if (s.reps <= 1) s.weight else s.weight * (1 + s.reps / 30.0)
 
 fun lastSetsFor(data: AppData, exerciseId: String): List<WorkSet>? =
     data.workouts.sortedByDescending { it.startedAt }
-        .firstNotNullOfOrNull { w -> w.entries.firstOrNull { it.exerciseId == exerciseId && it.sets.isNotEmpty() }?.sets }
+        .firstNotNullOfOrNull { w -> w.entries.firstOrNull { it.exerciseId == exerciseId && it.sets.any { s -> s.counts } }?.sets?.filter { it.counts } }
 
 fun round1(d: Double) = (d * 10).roundToInt() / 10.0
 
@@ -67,7 +76,7 @@ fun fmtCompact(v: Double): String = when {
     else -> fmtWeight(round1(v))
 }
 
-fun Workout.reps(): Int = entries.sumOf { e -> e.sets.sumOf { it.reps } }
+fun Workout.reps(): Int = entries.sumOf { e -> e.sets.filter { it.counts }.sumOf { it.reps } }
 
 fun mondayOf(epochDay: Long): Long {
     val d = LocalDate.ofEpochDay(epochDay)
@@ -157,21 +166,74 @@ fun suggestTarget(last: List<WorkSet>?): Target? {
     val topSets = last.filter { it.weight == top }
     val goal = topSets.first().reps.coerceAtLeast(1)
     if (top == 0.0) return Target(0.0, topSets.maxOf { it.reps } + 1, true)
-    val completed = topSets.all { it.reps >= goal }
+    // Si se sintió muy pesado (esfuerzo 9 o 10), no sube el peso.
+    val completed = topSets.all { it.reps >= goal } && topSets.none { (it.rpe ?: 0) >= 9 }
     val inc = if (top >= 20) 2.5 else 1.0
     return if (completed) Target(round1(top + inc), goal, true) else Target(top, goal, false)
 }
 
-data class Bests(val weight: Double, val oneRm: Double)
+data class Bests(val weight: Double, val oneRm: Double, val seconds: Int = 0, val km: Double = 0.0)
 
 fun bestsFor(data: AppData, exerciseId: String): Bests? {
-    val sets = data.workouts.flatMap { w -> w.entries.filter { it.exerciseId == exerciseId }.flatMap { it.sets } }
+    val sets = data.workouts.flatMap { w -> w.entries.filter { it.exerciseId == exerciseId }.flatMap { it.sets } }.filter { it.counts }
     if (sets.isEmpty()) return null
-    return Bests(sets.maxOf { it.weight }, sets.maxOf { oneRm(it) })
+    return Bests(sets.maxOf { it.weight }, sets.maxOf { oneRm(it) }, sets.maxOf { it.seconds ?: 0 }, sets.maxOf { it.km ?: 0.0 })
 }
 
-fun isPr(set: WorkSet, prev: Bests?): Boolean =
-    prev != null && (set.weight > prev.weight || oneRm(set) > prev.oneRm + 0.01)
+fun isPr(set: WorkSet, prev: Bests?): Boolean = prev != null && set.counts && when {
+    set.km != null -> set.km > prev.km + 0.001
+    set.seconds != null -> set.seconds > prev.seconds
+    else -> set.weight > prev.weight || oneRm(set) > prev.oneRm + 0.01
+}
+
+fun fmtSecs(s: Int): String = "%d:%02d".format(s / 60, s % 60)
+
+/** Texto de una serie según el tipo de ejercicio. */
+fun fmtSet(s: WorkSet): String = when {
+    s.km != null -> "${fmtWeight(round1(s.km))} km · ${fmtSecs(s.seconds ?: 0)}"
+    s.seconds != null -> fmtSecs(s.seconds)
+    else -> "${fmtWeight(s.weight)}×${s.reps}"
+}
+
+// ---------- Calculadora de discos ----------
+
+/** Discos por lado para llegar a `total` con la barra dada. Devuelve los discos y lo que no se pudo cubrir. */
+fun platesFor(total: Double, bar: Double, plates: List<Double>): Pair<List<Double>, Double> {
+    var side = (total - bar) / 2
+    if (side <= 0) return emptyList<Double>() to 0.0
+    val out = mutableListOf<Double>()
+    for (p in plates.sortedDescending()) while (side + 1e-6 >= p) { out += p; side -= p }
+    return out to round1(side * 2 * 100) / 100
+}
+
+// ---------- Peso corporal: media de 7 días ----------
+
+/** Media móvil de 7 días en cada registro (incluye los registros de los 6 días anteriores). */
+fun movingAvg7(list: List<BodyWeight>): List<Pair<Long, Double>> {
+    val sorted = list.sortedBy { it.date }
+    return sorted.map { w -> w.date to sorted.filter { it.date in (w.date - 6)..w.date }.map { it.kg }.average() }
+}
+
+/** Cambio de la media en los últimos 7 días (kg/semana), si hay datos suficientes. */
+fun weeklyChange(list: List<BodyWeight>): Double? {
+    val avg = movingAvg7(list)
+    if (avg.size < 2) return null
+    val last = avg.last()
+    val ref = avg.lastOrNull { it.first <= last.first - 7 } ?: return null
+    val weeks = (last.first - ref.first) / 7.0
+    return (last.second - ref.second) / weeks
+}
+
+// ---------- Hábitos con cantidad ----------
+
+fun Habit.countToday(t: Long = today()) = counts[t] ?: 0
+
+/** Suma (o resta) cantidad hoy y marca el día como hecho al llegar a la meta. */
+fun Habit.addAmount(delta: Int, t: Long = today()): Habit {
+    val n = (countToday(t) + delta).coerceAtLeast(0)
+    val goal = target ?: return this
+    return copy(counts = counts + (t to n), doneDays = if (n >= goal) doneDays + t else doneDays - t)
+}
 
 // ---------- Antojos ----------
 

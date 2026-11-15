@@ -91,7 +91,7 @@ fun TodayScreen(data: AppData, onOpenSettings: () -> Unit, onGoTab: (Int) -> Uni
                 CardLabel("Agenda de hoy", R.drawable.ic_calendar)
                 Spacer(Modifier.height(8.dp))
                 if (todays.isEmpty()) Text("No tienes nada para hoy.", color = Faint, modifier = Modifier.padding(vertical = 8.dp))
-                todays.forEach { task -> AgendaRow(task, onToggle = { toggleTask(task) }, onClick = { editing = task }) }
+                todays.forEach { task -> SwipeTask(task) { Box(Modifier.background(CardBg)) { AgendaRow(task, onToggle = { toggleTask(task) }, onClick = { editing = task }) } } }
                 if (overdue.isNotEmpty()) {
                     Spacer(Modifier.height(4.dp))
                     Text("${overdue.size} pendiente(s) atrasado(s) · ver", color = Bad, style = MaterialTheme.typography.bodyMedium,
@@ -106,10 +106,16 @@ fun TodayScreen(data: AppData, onOpenSettings: () -> Unit, onGoTab: (Int) -> Uni
                 Spacer(Modifier.height(6.dp))
                 data.habits.forEach { h ->
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                        RoundCheck(t in h.doneDays, { toggleHabitToday(h) }, h.name)
+                        if (h.target != null) Box(Modifier.size(48.dp), contentAlignment = Alignment.Center) {
+                            Box(Modifier.size(34.dp).clip(CircleShape).background(if (t in h.doneDays) Ink else CardHigh)
+                                .clickable(onClickLabel = "Sumar ${h.step} ${h.unit}") { Fx.tick(); addHabitAmount(h, h.step) }, contentAlignment = Alignment.Center) {
+                                if (t in h.doneDays) OdIcon(R.drawable.ic_check, Bg, 16.dp) else Text("+", color = Ink, fontWeight = FontWeight.Bold)
+                            }
+                        } else RoundCheck(t in h.doneDays, { toggleHabitToday(h) }, h.name)
                         Text(h.emoji, fontSize = 18.sp)
                         Spacer(Modifier.width(8.dp))
                         Text(h.name, color = if (t in h.doneDays) Faint else Ink, modifier = Modifier.weight(1f), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        if (h.target != null) Text("${h.countToday()}/${h.target}", color = Muted, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(end = 10.dp))
                         val st = habitStreak(h)
                         if (st > 0) Text("$st d", color = Ink2, fontWeight = FontWeight.SemiBold, modifier = Modifier.padding(end = 6.dp))
                     }

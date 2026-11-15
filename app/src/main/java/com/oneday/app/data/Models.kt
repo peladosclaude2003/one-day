@@ -17,6 +17,7 @@ data class Task(
     val done: Boolean = false,
     val remind: Boolean = false,
     val doneAt: Long? = null,
+    val area: String? = null,
 )
 
 /** Racha: días sin un vicio. `start` = momento (millis) desde el que se cuenta. */
@@ -28,16 +29,37 @@ data class Streak(
     val start: Long,
     val bestDays: Long = 0,
     val resets: Int = 0,
+    val reason: String = "", // "Tu motivo"
 )
 
+/** Recaída registrada al reiniciar una racha. */
 @Serializable
-data class Exercise(val id: String = newId(), val name: String, val muscle: String)
+data class Relapse(val streakId: String, val at: Long, val trigger: String, val note: String = "", val days: Long = 0)
+
+val TRIGGERS = listOf("Estrés", "Social o fiesta", "Aburrimiento", "Cansancio", "Después de comer", "Otro")
+
+/** kind: 0 = peso × repeticiones · 1 = solo tiempo · 2 = tiempo y distancia. `note` = nota fija del ejercicio. */
+@Serializable
+data class Exercise(val id: String = newId(), val name: String, val muscle: String, val kind: Int = 0, val note: String = "")
+
+const val SET_NORMAL = 0
+const val SET_WARMUP = 1
+const val SET_FAILURE = 2
+const val SET_DROP = 3
 
 @Serializable
 data class Routine(val id: String = newId(), val name: String, val exerciseIds: List<String>)
 
+/** kind = tipo de serie (normal, calentamiento, al fallo, drop). rpe = esfuerzo 1–10. seconds/km para ejercicios de tiempo o distancia. */
 @Serializable
-data class WorkSet(val weight: Double, val reps: Int)
+data class WorkSet(
+    val weight: Double,
+    val reps: Int,
+    val kind: Int = SET_NORMAL,
+    val rpe: Int? = null,
+    val seconds: Int? = null,
+    val km: Double? = null,
+)
 
 @Serializable
 data class WorkEntry(val exerciseId: String, val sets: List<WorkSet> = emptyList())
@@ -50,6 +72,7 @@ data class Workout(
     val entries: List<WorkEntry> = emptyList(),
     val startedAt: Long = System.currentTimeMillis(),
     val minutes: Int = 0,
+    val note: String = "",
 )
 
 /** Hábito por construir: se marca una vez al día. `doneDays` = días (epochDay) cumplidos. */
@@ -61,6 +84,10 @@ data class Habit(
     val createdDay: Long,
     val doneDays: Set<Long> = emptySet(),
     val remindAt: Int? = null,
+    val target: Int? = null,          // meta diaria (null = sí/no)
+    val unit: String = "",            // vasos, min, páginas…
+    val step: Int = 1,                // cuánto suma cada toque
+    val counts: Map<Long, Int> = emptyMap(), // día → cantidad
 )
 
 /** Antojo superado con el botón SOS. */
@@ -89,6 +116,9 @@ data class Settings(
     val hapticsOn: Boolean = true,
     val hapticStrong: Boolean = false,
     val cravingAlertOn: Boolean = false,
+    val areas: List<String> = listOf("Trabajo", "Casa", "Salud", "Personal"),
+    val barKg: Double = 20.0,
+    val plates: List<Double> = listOf(25.0, 20.0, 15.0, 10.0, 5.0, 2.5, 1.25),
 )
 
 @Serializable
@@ -102,6 +132,7 @@ data class AppData(
     val bodyWeights: List<BodyWeight> = emptyList(),
     val habits: List<Habit> = emptyList(),
     val cravings: List<Craving> = emptyList(),
+    val relapses: List<Relapse> = emptyList(),
     val settings: Settings = Settings(),
 )
 
@@ -132,9 +163,10 @@ object Defaults {
         ex("ex_martillo", "Curl martillo", "Bíceps"),
         ex("ex_triceps_polea", "Extensión de tríceps en polea", "Tríceps"),
         ex("ex_frances", "Press francés", "Tríceps"),
-        ex("ex_plancha", "Plancha (segundos)", "Abdomen"),
+        Exercise("ex_plancha", "Plancha", "Abdomen", kind = 1),
         ex("ex_crunch", "Crunch", "Abdomen"),
-        ex("ex_caminadora", "Caminadora (minutos)", "Cardio"),
+        Exercise("ex_caminadora", "Caminadora", "Cardio", kind = 2),
+        Exercise("ex_bici", "Bicicleta", "Cardio", kind = 2),
     )
     val routines = listOf(
         Routine("r_push", "Empuje (pecho, hombro, tríceps)", listOf("ex_banca", "ex_inclinado", "ex_militar", "ex_laterales", "ex_triceps_polea")),

@@ -141,43 +141,46 @@ fun WeekBars(values: List<Int>, modifier: Modifier = Modifier, barArea: Dp = 56.
     }
 }
 
-/** Línea pequeña de peso corporal con la meta punteada. */
+/** Peso corporal: registros en gris tenue, media de 7 días en blanco y meta punteada. */
 @Composable
-fun WeightSpark(values: List<Double>, goal: Double?, modifier: Modifier = Modifier) {
-    Canvas(modifier.fillMaxWidth().height(44.dp)) {
-        val all = values + listOfNotNull(goal)
+fun WeightSpark(raw: List<Pair<Long, Double>>, avg: List<Pair<Long, Double>>, goal: Double?, modifier: Modifier = Modifier) {
+    Canvas(modifier.fillMaxWidth().height(56.dp)) {
+        val all = raw.map { it.second } + listOfNotNull(goal)
         if (all.isEmpty()) return@Canvas
-        val lo = all.min() - 1; val hi = all.max() + 1
+        val lo = all.min() - 0.5; val hi = all.max() + 0.5
+        val d0 = raw.first().first; val d1 = raw.last().first
+        val span = (d1 - d0).coerceAtLeast(1)
+        fun x(d: Long) = ((d - d0).toFloat() / span) * (size.width - 8.dp.toPx()) + 4.dp.toPx()
         fun y(v: Double) = (size.height - ((v - lo) / (hi - lo) * size.height)).toFloat()
         if (goal != null) drawLine(Faint, Offset(0f, y(goal)), Offset(size.width, y(goal)), strokeWidth = 1.5.dp.toPx(),
             pathEffect = PathEffect.dashPathEffect(floatArrayOf(6.dp.toPx(), 5.dp.toPx())))
-        if (values.size >= 2) {
-            val step = size.width / (values.size - 1)
+        raw.forEach { (d, v) -> drawCircle(Faint, 2.5.dp.toPx(), Offset(x(d), y(v))) }
+        if (avg.size >= 2) {
             val p = Path()
-            values.forEachIndexed { i, v -> if (i == 0) p.moveTo(0f, y(v)) else p.lineTo(i * step, y(v)) }
+            avg.forEachIndexed { i, (d, v) -> if (i == 0) p.moveTo(x(d), y(v)) else p.lineTo(x(d), y(v)) }
             drawPath(p, Ink2, style = Stroke(2.dp.toPx(), cap = StrokeCap.Round))
-            drawCircle(Accent, 4.dp.toPx(), Offset(size.width, y(values.last())))
         }
+        avg.lastOrNull()?.let { (d, v) -> drawCircle(Accent, 4.dp.toPx(), Offset(x(d), y(v))) }
     }
 }
 
 /** Línea de progreso de un ejercicio. Toca un punto para ver su valor. */
 @Composable
-fun LineChart(points: List<Pair<Long, Double>>) {
+fun LineChart(points: List<Pair<Long, Double>>, unit: String = "kg", fmt: (Double) -> String = { fmtWeight(round1(it)) }) {
     var sel by remember(points) { mutableIntStateOf(points.lastIndex) }
     val minV = points.minOf { it.second }
     val maxV = points.maxOf { it.second }
-    val pad = ((maxV - minV) * 0.15).coerceAtLeast(2.5)
+    val pad = ((maxV - minV) * 0.15).coerceAtLeast(if (unit == "kg") 2.5 else maxV * 0.05 + 0.1)
     val lo = (minV - pad).coerceAtLeast(0.0)
     val hi = maxV + pad
     val p = points[sel]
-    Text("${fmtWeight(p.second)} kg · ${fmtDay(p.first)}", fontWeight = FontWeight.SemiBold, color = Ink)
+    Text("${fmt(p.second)} $unit · ${fmtDay(p.first)}", fontWeight = FontWeight.SemiBold, color = Ink)
     Spacer(Modifier.height(10.dp))
     Row {
         Column(Modifier.height(170.dp).padding(end = 6.dp), verticalArrangement = Arrangement.SpaceBetween) {
-            Text(fmtWeight(round1(hi)), color = Faint, style = MaterialTheme.typography.labelSmall)
-            Text(fmtWeight(round1((hi + lo) / 2)), color = Faint, style = MaterialTheme.typography.labelSmall)
-            Text(fmtWeight(round1(lo)), color = Faint, style = MaterialTheme.typography.labelSmall)
+            Text(fmt(hi), color = Faint, style = MaterialTheme.typography.labelSmall)
+            Text(fmt((hi + lo) / 2), color = Faint, style = MaterialTheme.typography.labelSmall)
+            Text(fmt(lo), color = Faint, style = MaterialTheme.typography.labelSmall)
         }
         Canvas(
             Modifier.weight(1f).height(170.dp).pointerInput(points) {

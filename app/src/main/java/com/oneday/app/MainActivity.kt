@@ -62,6 +62,7 @@ class MainActivity : ComponentActivity() {
                             else -> GymScreen(data)
                         }
                     }
+                    UndoBar(Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(bottom = 92.dp))
                     AnimatedVisibility(
                         visible = !(UiState.hideNav && tab == 3) && UiState.sosStreak == null,
                         enter = fadeIn() + slideInVertically { it }, exit = fadeOut() + slideOutVertically { it },

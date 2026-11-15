@@ -20,6 +20,8 @@ import com.oneday.app.data.today
 import com.oneday.app.data.habitStreak
 import com.oneday.app.data.cravingAlertTime
 import com.oneday.app.data.bucketLabel
+import com.oneday.app.data.countToday
+import com.oneday.app.data.addAmount
 import java.time.LocalDate
 
 object Notifier {
@@ -36,12 +38,15 @@ object Notifier {
         ctx.getSystemService(NotificationManager::class.java).createNotificationChannel(ch)
     }
 
-    fun show(ctx: Context, id: Int, title: String, text: String) {
+    /** Botón de una notificación: tipo de acción + id del pendiente o hábito. */
+    data class Action(val label: String, val type: String, val itemId: String)
+
+    fun show(ctx: Context, id: Int, title: String, text: String, actions: List<Action> = emptyList()) {
         val open = PendingIntent.getActivity(
             ctx, 0, Intent(ctx, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP),
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
-        val n = NotificationCompat.Builder(ctx, CHANNEL)
+        val b = NotificationCompat.Builder(ctx, CHANNEL)
             .setSmallIcon(R.drawable.ic_notification)
             .setContentTitle(title)
             .setContentText(text)
@@ -49,8 +54,11 @@ object Notifier {
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setContentIntent(open)
             .setAutoCancel(true)
-            .build()
-        runCatching { NotificationManagerCompat.from(ctx).notify(id, n) }
+        actions.forEachIndexed { i, a ->
+            val pi = pending(ctx, id * 10 + i + 7, intent(ctx, a.type, a.itemId).putExtra("notif", id))
+            b.addAction(0, a.label, pi)
+        }
+        runCatching { NotificationManagerCompat.from(ctx).notify(id, b.build()) }
     }
 
     private fun intent(ctx: Context, type: String, id: String? = null) =
@@ -114,7 +122,8 @@ object Notifier {
         when (type) {
             "task" -> {
                 val task = d.tasks.firstOrNull { it.id == id } ?: return
-                if (!task.done) show(ctx, task.id.hashCode(), "⏰ ${task.title}", task.notes.ifBlank { "Es hora de tu pendiente." })
+                if (!task.done) show(ctx, task.id.hashCode(), "⏰ ${task.title}", task.notes.ifBlank { "Es hora de tu pendiente." },
+                    listOf(Action("Hecho", "act_done", task.id), Action("Posponer 1 h", "act_snooze", task.id)))
             }
             "summary" -> {
                 val todays = d.tasks.filter { !it.done && it.date == t }
@@ -137,14 +146,34 @@ object Notifier {
                 val h = d.habits.firstOrNull { it.id == id } ?: return
                 if (t !in h.doneDays) {
                     val streak = habitStreak(h)
+                    val progress = h.target?.let { " Vas ${h.countToday()}/$it ${h.unit}." } ?: ""
                     show(ctx, ("h" + h.id).hashCode(), "${h.emoji} ${h.name}",
-                        if (streak > 0) "Llevas $streak día(s) seguidos. Márcalo hoy para no romper la racha." else "Hoy es buen día para empezar.")
+                        (if (streak > 0) "Llevas $streak día(s) seguidos. Márcalo hoy para no romper la racha." else "Hoy es buen día para empezar.") + progress,
+                        listOf(Action("Hecho hoy", "act_habit", h.id)))
                 }
             }
             "craving" -> {
                 val alert = cravingAlertTime(d.cravings) ?: return
                 val peak = (alert + 30) / 180
                 show(ctx, REQ_CRAVING, "🫁 Se acerca tu hora difícil", "Sueles tener antojos entre ${bucketLabel(peak % 8)}. Si llegan, abre One Day y respira 60 segundos.")
+            }
+            // Botones de las notificaciones
+            "act_done" -> {
+                Repo.update { dd -> dd.copy(tasks = dd.tasks.map { if (it.id == id) it.copy(done = true, doneAt = System.currentTimeMillis()) else it }) }
+                NotificationManagerCompat.from(ctx).cancel(id.hashCode())
+            }
+            "act_snooze" -> {
+                val at = java.time.LocalDateTime.now().plusHours(1)
+                Repo.update { dd -> dd.copy(tasks = dd.tasks.map {
+                    if (it.id == id) it.copy(date = at.toLocalDate().toEpochDay(), time = at.hour * 60 + at.minute, remind = true) else it
+                }) }
+                NotificationManagerCompat.from(ctx).cancel(id.hashCode())
+            }
+            "act_habit" -> {
+                Repo.update { dd -> dd.copy(habits = dd.habits.map {
+                    if (it.id != id) it else if (it.target != null) it.addAmount((it.target - it.countToday()).coerceAtLeast(0)) else it.copy(doneDays = it.doneDays + t)
+                }) }
+                NotificationManagerCompat.from(ctx).cancel(("h" + id).hashCode())
             }
             "milestone" -> {
                 d.streaks.forEach { s ->

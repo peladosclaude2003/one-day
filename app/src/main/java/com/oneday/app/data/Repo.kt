@@ -23,7 +23,16 @@ object Repo {
                 .onSuccess { d ->
                     // Quien ya usaba la app antes de la bienvenida no tiene por qué verla.
                     val hadData = d.tasks.isNotEmpty() || d.streaks.isNotEmpty() || d.workouts.isNotEmpty()
-                    _state.value = if (!d.settings.onboarded && hadData) d.copy(settings = d.settings.copy(onboarded = true)) else d
+                    var m = if (!d.settings.onboarded && hadData) d.copy(settings = d.settings.copy(onboarded = true)) else d
+                    // v1.3: plancha y caminadora pasan a ser de tiempo / distancia.
+                    m = m.copy(exercises = m.exercises.map {
+                        when {
+                            it.id == "ex_plancha" && it.kind == 0 -> it.copy(kind = 1, name = it.name.replace(" (segundos)", ""))
+                            it.id == "ex_caminadora" && it.kind == 0 -> it.copy(kind = 2, name = it.name.replace(" (minutos)", ""))
+                            else -> it
+                        }
+                    } + Defaults.exercises.filter { def -> def.id == "ex_bici" && m.exercises.none { it.id == def.id } })
+                    _state.value = m
                 }
                 .onFailure { f.copyTo(File(f.parentFile, "data-corrupto.json"), overwrite = true) }
         }
