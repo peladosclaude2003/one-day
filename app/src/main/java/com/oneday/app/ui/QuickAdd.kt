@@ -34,7 +34,7 @@ fun QuickAddSheet(defaultDate: Long?, onDismiss: () -> Unit) {
     fun save() {
         if (p.title.isBlank()) return
         if (p.daily) {
-            Repo.update { d -> d.copy(habits = d.habits + Habit(name = p.title, emoji = "✅", createdDay = today(), remindAt = p.time)) }
+            Repo.update { d -> d.copy(habits = d.habits + Habit(name = p.title, emoji = "hecho", createdDay = today(), remindAt = p.time)) }
         } else {
             saveTask(Task(title = p.title, date = date, time = p.time, priority = p.priority ?: 1, remind = date != null && p.time != null, area = p.area))
         }

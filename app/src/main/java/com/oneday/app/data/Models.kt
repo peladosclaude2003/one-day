@@ -25,7 +25,7 @@ data class Task(
 data class Streak(
     val id: String = newId(),
     val name: String,
-    val emoji: String = "🚭",
+    val emoji: String = "fumar", // clave del ícono (antes guardaba un emoji)
     val start: Long,
     val bestDays: Long = 0,
     val resets: Int = 0,
@@ -59,6 +59,7 @@ data class WorkSet(
     val rpe: Int? = null,
     val seconds: Int? = null,
     val km: Double? = null,
+    val done: Boolean = true, // false = serie planeada que aún no haces
 )
 
 @Serializable
@@ -80,7 +81,7 @@ data class Workout(
 data class Habit(
     val id: String = newId(),
     val name: String,
-    val emoji: String = "💧",
+    val emoji: String = "agua", // clave del ícono (antes guardaba un emoji)
     val createdDay: Long,
     val doneDays: Set<Long> = emptySet(),
     val remindAt: Int? = null,
@@ -119,6 +120,7 @@ data class Settings(
     val areas: List<String> = listOf("Trabajo", "Casa", "Salud", "Personal"),
     val barKg: Double = 20.0,
     val plates: List<Double> = listOf(25.0, 20.0, 15.0, 10.0, 5.0, 2.5, 1.25),
+    val seenMedals: Set<String> = emptySet(),
 )
 
 @Serializable

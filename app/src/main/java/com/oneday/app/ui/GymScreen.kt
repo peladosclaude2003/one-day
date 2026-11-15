@@ -20,6 +20,9 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -63,7 +66,7 @@ fun gymSubtitle(data: AppData): String {
 
 fun startWorkout(name: String, exerciseIds: List<String>) {
     GymUi.minimized = false
-    Repo.update { d -> d.copy(activeWorkout = Workout(date = today(), name = name, entries = exerciseIds.map { WorkEntry(it) })) }
+    Repo.update { d -> d.copy(activeWorkout = Workout(date = today(), name = name, entries = exerciseIds.map { WorkEntry(it, plannedSets(d, it)) })) }
 }
 
 // ---------- Resumen ----------
@@ -174,7 +177,7 @@ private fun HeroWorkoutCard(data: AppData, onPickOther: () -> Unit) {
         }
         if (trainedToday.isNotEmpty()) {
             Spacer(Modifier.height(12.dp))
-            Text("✓ Hoy ya entrenaste: ${trainedToday.joinToString { shortName(it.name) }}", color = Good, style = MaterialTheme.typography.bodyMedium)
+            Row(verticalAlignment = Alignment.CenterVertically) { Glyph("hecho", Good, 16.dp); Spacer(Modifier.width(6.dp)); Text("Hoy ya entrenaste: ${trainedToday.joinToString { shortName(it.name) }}", color = Good, style = MaterialTheme.typography.bodyMedium) }
         }
         Spacer(Modifier.height(20.dp))
         PrimaryButton("Empezar entrenamiento", icon = R.drawable.ic_play) {
@@ -299,7 +302,7 @@ private fun BodyWeightCard(data: AppData, onClick: () -> Unit) {
                 else -> {
                     val gap = goal - (avgNow ?: last.kg)
                     val toward = rate != null && rate != 0.0 && (gap > 0) == (rate > 0)
-                    if (kotlin.math.abs(gap) < 0.15) "¡Meta de ${fmtWeight(goal)} kg alcanzada! 🎉"
+                    if (kotlin.math.abs(gap) < 0.15) "¡Meta de ${fmtWeight(goal)} kg alcanzada!"
                     else "Meta ${fmtWeight(goal)} kg · faltan ${fmtWeight(round1(kotlin.math.abs(gap)))} kg" +
                         if (toward) " · ~${kotlin.math.ceil(kotlin.math.abs(gap / rate!!)).toInt()} semanas a este ritmo" else ""
                 }
@@ -348,71 +351,78 @@ private fun WeightSheet(data: AppData, onDismiss: () -> Unit) {
 @Composable
 private fun ActiveWorkout(data: AppData, w: Workout) {
     var addEx by remember { mutableStateOf(false) }
-    var editSet by remember { mutableStateOf<Pair<Int, Int>?>(null) } // (entrada, serie); serie = -1 para nueva
+    var dialogSet by remember { mutableStateOf<Pair<Int, Int>?>(null) }
     var confirmDiscard by remember { mutableStateOf(false) }
-    var celebrate by remember { mutableIntStateOf(0) }
     var noteFor by remember { mutableStateOf<String?>(null) }
+    var focus by rememberSaveable { mutableIntStateOf(w.entries.indexOfFirst { e -> e.sets.isEmpty() || e.sets.any { !it.done } }.coerceAtLeast(0)) }
+    var activeSet by remember { mutableStateOf<Int?>(null) }
     val bests = remember(data.workouts) { w.entries.map { it.exerciseId }.distinct().associateWith { bestsFor(data, it) } }
     val now = rememberNow()
-    val mins = ((now - w.startedAt) / 60_000).toInt()
+    val elapsed = ((now - w.startedAt) / 1000).toInt()
     fun upd(f: (Workout) -> Workout) = Repo.update { d -> d.copy(activeWorkout = d.activeWorkout?.let(f)) }
+    fun setAt(ei: Int, si: Int, f: (WorkSet) -> WorkSet) = upd { it.copy(entries = it.entries.mapIndexed { i, en ->
+        if (i != ei) en else en.copy(sets = en.sets.mapIndexed { j, st -> if (j == si) f(st) else st }) }) }
     DisposableEffect(Unit) { UiState.hideNav = true; onDispose { UiState.hideNav = false } }
     BackHandler { GymUi.minimized = true }
 
-    Box { Column {
-        Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+    val total = w.entries.sumOf { it.sets.size }
+    val doneN = w.entries.sumOf { e -> e.sets.count { it.done } }
+    val prog by androidx.compose.animation.core.animateFloatAsState(if (total == 0) 0f else doneN / total.toFloat(), label = "prog")
+
+    /** Marca/desmarca una serie; si es récord, medalla y doble pulso. */
+    fun toggleDone(ei: Int, si: Int) {
+        val e = w.entries[ei]; val st = e.sets[si]
+        val nowDone = !st.done
+        if (nowDone) {
+            val prevBest = bests[e.exerciseId]
+            val hadPr = e.sets.any { isPr(it, prevBest) }
+            val after = st.copy(done = true)
+            if (isPr(after, prevBest) && !hadPr && Repo.data.settings.celebrationsOn) {
+                Fx.pr()
+                UiState.medal = MedalMsg("PR", "RÉCORD", Tier.Naranja, "Récord en ${exName(data, e.exerciseId)}", fmtSet(after).replace("×", " kg × ").let { if (after.km != null || after.seconds != null) fmtSet(after) else it })
+            } else Fx.success()
+            // la siguiente serie pendiente pasa a ser la activa
+            activeSet = e.sets.indices.firstOrNull { it > si && !e.sets[it].done }
+        } else Fx.tick()
+        setAt(ei, si) { it.copy(done = nowDone) }
+    }
+
+    Column {
+        // Encabezado
+        Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 20.dp, top = 16.dp, bottom = 10.dp), verticalAlignment = Alignment.CenterVertically) {
             CircleButton("Minimizar", onClick = { GymUi.minimized = true }) { Icon(Icons.Filled.KeyboardArrowDown, null, tint = Ink) }
             Spacer(Modifier.width(12.dp))
             Column(Modifier.weight(1f)) {
-                Text("En curso", color = Accent, style = MaterialTheme.typography.bodySmall)
-                Text(shortName(w.name), style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold, color = Ink, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text("En curso · %d:%02d".format(elapsed / 60, elapsed % 60), color = Accent, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
+                Text(shortName(w.name), fontFamily = Display, fontSize = 24.sp, fontWeight = FontWeight.Bold, color = Ink, maxLines = 1, overflow = TextOverflow.Ellipsis, letterSpacing = (-0.5).sp)
             }
+            Text("$doneN / $total", fontFamily = Display, color = Muted, fontSize = 15.sp)
         }
-        Row(Modifier.padding(horizontal = 16.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            InfoPill("$mins min", R.drawable.ic_clock)
-            InfoPill("${w.setCount()} series", R.drawable.ic_layers)
-            InfoPill("${fmtCompact(w.volume())} kg", R.drawable.ic_bolt)
+        Box(Modifier.padding(horizontal = 16.dp).fillMaxWidth().height(4.dp).clip(RoundedCornerShape(50)).background(CardHigh)) {
+            Box(Modifier.fillMaxWidth(prog).fillMaxHeight().clip(RoundedCornerShape(50)).background(Accent))
         }
         LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            if (w.entries.isEmpty()) item { EmptyState("🏋️", "Agrega tu primer ejercicio", "Usa el botón de abajo.") }
+            if (w.entries.isEmpty()) item { EmptyState("gym", "Agrega tu primer ejercicio", "Usa el botón de abajo.") }
             w.entries.forEachIndexed { ei, e ->
                 item(key = "e$ei${e.exerciseId}") {
-                    val prev = lastSetsFor(data, e.exerciseId)
                     val exercise = data.exercises.firstOrNull { it.id == e.exerciseId }
-                    val target = if ((exercise?.kind ?: 0) == 0) suggestTarget(prev) else null
-                    val best = bests[e.exerciseId]
-                    OdCard {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Column(Modifier.weight(1f)) {
-                                Text(exName(data, e.exerciseId), color = Ink, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.titleMedium)
-                                if (prev != null) Text("Última vez: " + prev.joinToString("  ") { fmtSet(it) }, color = Faint, style = MaterialTheme.typography.bodySmall)
-                                Text(
-                                    exercise?.note?.ifBlank { null }?.let { "📌 $it" } ?: "+ Nota del ejercicio",
-                                    color = if (exercise?.note.isNullOrBlank()) Faint else Ink2, style = MaterialTheme.typography.bodySmall,
-                                    modifier = Modifier.padding(top = 4.dp).clip(RoundedCornerShape(50)).clickable { noteFor = e.exerciseId }.padding(vertical = 4.dp),
-                                )
-                            }
-                            IconButton(onClick = { upd { it.copy(entries = it.entries.filterIndexed { i, _ -> i != ei }) } }) { Icon(Icons.Filled.Close, "Quitar ejercicio", tint = Faint) }
-                        }
-                        if (target != null) {
-                            Spacer(Modifier.height(8.dp))
-                            Row(Modifier.clip(RoundedCornerShape(50)).background(CardHigh).padding(horizontal = 14.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                                Text(if (target.up) "↑" else "=", color = if (target.up) Accent else Muted, fontWeight = FontWeight.Bold)
-                                Spacer(Modifier.width(8.dp))
-                                Text("Objetivo de hoy: ${fmtWeight(target.weight)} kg × ${target.reps}", color = Ink2, style = MaterialTheme.typography.bodyMedium)
-                            }
-                        }
-                        var n = 0
-                        e.sets.forEachIndexed { si, s ->
-                            if (s.counts) n++
-                            SetRow(n, s, isPr(s, best)) { editSet = ei to si }
-                        }
-                        Spacer(Modifier.height(10.dp))
-                        Row(
-                            Modifier.clip(RoundedCornerShape(50)).border1().clickable { editSet = ei to -1 }.padding(horizontal = 16.dp, vertical = 9.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) { Icon(Icons.Filled.Add, null, tint = Ink2, modifier = Modifier.size(18.dp)); Spacer(Modifier.width(6.dp)); Text("Agregar serie", color = Ink2) }
-                    }
+                    if (ei != focus) CollapsedExercise(data, e, exercise) { focus = ei; activeSet = null }
+                    else ExpandedExercise(
+                        data, e, exercise, bests[e.exerciseId], activeSet,
+                        onSelect = { si -> activeSet = if (activeSet == si) null else si },
+                        onToggle = { si -> toggleDone(ei, si) },
+                        onChange = { si, f -> setAt(ei, si, f) },
+                        onMore = { si -> dialogSet = ei to si },
+                        onAdd = {
+                            val base = e.sets.lastOrNull()?.copy(done = false, rpe = null)
+                                ?: (if ((exercise?.kind ?: 0) == 0) suggestTarget(lastSetsFor(data, e.exerciseId))?.let { WorkSet(it.weight, it.reps, done = false) } else null)
+                                ?: when (exercise?.kind ?: 0) { 1 -> WorkSet(0.0, 0, seconds = 30, done = false); 2 -> WorkSet(0.0, 0, seconds = 1200, km = 2.0, done = false); else -> WorkSet(20.0, 10, done = false) }
+                            upd { it.copy(entries = it.entries.mapIndexed { i, en -> if (i == ei) en.copy(sets = en.sets + base) else en }) }
+                            activeSet = e.sets.size; Fx.tick()
+                        },
+                        onRemove = { upd { it.copy(entries = it.entries.filterIndexed { i, _ -> i != ei }) }; focus = 0; activeSet = null },
+                        onNote = { noteFor = e.exerciseId },
+                    )
                 }
             }
             item { SecondaryButton("+ Agregar ejercicio") { addEx = true } }
@@ -422,39 +432,205 @@ private fun ActiveWorkout(data: AppData, w: Workout) {
             }
         }
         Row(Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-            SecondaryButton("Descartar", Modifier.weight(1f), color = Bad) { confirmDiscard = true }
-            PrimaryButton("Terminar", Modifier.weight(1.4f)) {
+            SecondaryButton("Descartar", Modifier.width(118.dp), color = Bad) { Fx.reject(); confirmDiscard = true }
+            PrimaryButton("Terminar entrenamiento", Modifier.weight(1f)) {
                 Fx.success()
                 Repo.update { d ->
-                    val done = w.copy(minutes = mins, entries = w.entries.filter { it.sets.isNotEmpty() })
-                    d.copy(activeWorkout = null, workouts = if (done.entries.isEmpty()) d.workouts else d.workouts + done)
+                    val fin = w.copy(minutes = elapsed / 60, entries = w.entries.map { en -> en.copy(sets = en.sets.filter { it.done }) }.filter { it.sets.isNotEmpty() })
+                    d.copy(activeWorkout = null, workouts = if (fin.entries.isEmpty()) d.workouts else d.workouts + fin)
                 }
             }
         }
     }
-    Confetti(celebrate) }
 
-    if (addEx) ExercisePicker(data, onDismiss = { addEx = false }) { id -> upd { it.copy(entries = it.entries + WorkEntry(id)) } }
-    editSet?.let { (ei, si) ->
+    if (addEx) ExercisePicker(data, onDismiss = { addEx = false }) { id ->
+        upd { it.copy(entries = it.entries + WorkEntry(id, plannedSets(data, id))) }; focus = w.entries.size; activeSet = null
+    }
+    dialogSet?.let { (ei, si) ->
         val entry = w.entries.getOrNull(ei)
-        if (entry == null) { editSet = null; return@let }
-        val ex = data.exercises.firstOrNull { it.id == entry.exerciseId }
-        val base = entry.sets.getOrNull(si) ?: entry.sets.lastOrNull()?.copy(rpe = null)
-            ?: (if ((ex?.kind ?: 0) == 0) suggestTarget(lastSetsFor(data, entry.exerciseId))?.let { WorkSet(it.weight, it.reps) } else lastSetsFor(data, entry.exerciseId)?.lastOrNull())
-        SetDialog(ex, base, canDelete = si >= 0, onDismiss = { editSet = null },
-            onDelete = { upd { it.copy(entries = it.entries.mapIndexed { i, en -> if (i == ei) en.copy(sets = en.sets.filterIndexed { j, _ -> j != si }) else en }) } },
-        ) { set ->
-            val prevBest = bests[entry.exerciseId]
-            val hadPr = entry.sets.any { isPr(it, prevBest) }
-            if (isPr(set, prevBest) && !hadPr) { Fx.success(); celebrate++ } else Fx.tick()
-            upd { it.copy(entries = it.entries.mapIndexed { i, en ->
-                if (i != ei) en else en.copy(sets = if (si < 0) en.sets + set else en.sets.mapIndexed { j, s -> if (j == si) set else s })
-            }) }
-        }
+        val base = entry?.sets?.getOrNull(si)
+        if (entry == null || base == null) { dialogSet = null; return@let }
+        SetDialog(data.exercises.firstOrNull { it.id == entry.exerciseId }, base, canDelete = true, onDismiss = { dialogSet = null },
+            onDelete = { Fx.reject(); upd { it.copy(entries = it.entries.mapIndexed { i, en -> if (i == ei) en.copy(sets = en.sets.filterIndexed { j, _ -> j != si }) else en }) }; activeSet = null },
+        ) { set -> setAt(ei, si) { set.copy(done = it.done) } }
     }
     noteFor?.let { id -> ExerciseNoteDialog(data, id) { noteFor = null } }
     if (confirmDiscard) ConfirmDialog("Descartar entrenamiento", "Se perderán las series de este entrenamiento.", "Descartar", { confirmDiscard = false }) {
         Repo.update { it.copy(activeWorkout = null) }
+    }
+}
+
+@Composable
+private fun CollapsedExercise(data: AppData, e: WorkEntry, ex: Exercise?, onClick: () -> Unit) {
+    val done = e.sets.count { it.done }
+    val target = if ((ex?.kind ?: 0) == 0) suggestTarget(lastSetsFor(data, e.exerciseId)) else null
+    OdCard(onClick = onClick, padding = 14.dp) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            IconChip("gym", if (e.sets.isNotEmpty() && done == e.sets.size) ChipState.Done else ChipState.Normal, 40.dp)
+            Spacer(Modifier.width(8.dp))
+            Column(Modifier.weight(1f)) {
+                Text(ex?.name ?: "Ejercicio", color = Ink, fontWeight = FontWeight.Medium)
+                Text("$done / ${e.sets.size} series" + (target?.let { " · objetivo ${fmtWeight(it.weight)} × ${it.reps}" } ?: ""), color = Muted, style = MaterialTheme.typography.bodySmall)
+            }
+            Icon(Icons.Filled.KeyboardArrowRight, null, tint = Faint)
+        }
+    }
+}
+
+@Composable
+private fun ExpandedExercise(
+    data: AppData, e: WorkEntry, ex: Exercise?, best: Bests?, activeSet: Int?,
+    onSelect: (Int) -> Unit, onToggle: (Int) -> Unit, onChange: (Int, (WorkSet) -> WorkSet) -> Unit,
+    onMore: (Int) -> Unit, onAdd: () -> Unit, onRemove: () -> Unit, onNote: () -> Unit,
+) {
+    val kind = ex?.kind ?: 0
+    val prev = lastSetsFor(data, e.exerciseId)
+    val target = if (kind == 0) suggestTarget(prev) else null
+    OdCard(padding = 16.dp) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            IconChip("gym", size = 44.dp)
+            Spacer(Modifier.width(6.dp))
+            Column(Modifier.weight(1f)) {
+                Text(ex?.name ?: "Ejercicio", color = Ink, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.titleMedium)
+                Row(Modifier.clip(RoundedCornerShape(50)).clickable(onClick = onNote).padding(vertical = 3.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Glyph("pin", Muted, 13.dp); Spacer(Modifier.width(5.dp))
+                    Text(ex?.note?.ifBlank { null } ?: "Agregar nota", color = if (ex?.note.isNullOrBlank()) Faint else Ink2, style = MaterialTheme.typography.bodySmall)
+                }
+            }
+            if (target != null) Row(Modifier.clip(RoundedCornerShape(50)).background(if (target.up) AccentSoft else CardHigh).padding(horizontal = 10.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically) {
+                Glyph(if (target.up) "arriba" else "igual", if (target.up) AccentText else Muted, 13.dp); Spacer(Modifier.width(4.dp))
+                Text("${fmtWeight(target.weight)} kg", color = if (target.up) AccentText else Ink2, style = MaterialTheme.typography.labelLarge, fontWeight = FontWeight.SemiBold)
+            }
+            IconButton(onClick = onRemove) { Glyph("cerrar", Faint, 18.dp, "Quitar ejercicio") }
+        }
+        Spacer(Modifier.height(10.dp))
+        // Encabezado de la tabla
+        val (c3, c4) = when (kind) { 1 -> "SEG" to ""; 2 -> "KM" to "MIN"; else -> "KG" to "REPS" }
+        Row(Modifier.padding(horizontal = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+            listOf("SERIE" to 44.dp, "ANTERIOR" to 0.dp).forEach { (t, w) ->
+                Text(t, color = Muted, style = MaterialTheme.typography.labelSmall, letterSpacing = 1.2.sp, fontWeight = FontWeight.SemiBold,
+                    modifier = if (w > 0.dp) Modifier.width(w) else Modifier.weight(1f))
+            }
+            Text(c3, color = Muted, style = MaterialTheme.typography.labelSmall, letterSpacing = 1.2.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.width(70.dp), textAlign = TextAlign.Center)
+            Text(c4, color = Muted, style = MaterialTheme.typography.labelSmall, letterSpacing = 1.2.sp, fontWeight = FontWeight.SemiBold, modifier = Modifier.width(52.dp), textAlign = TextAlign.Center)
+            Spacer(Modifier.width(44.dp))
+        }
+        Spacer(Modifier.height(4.dp))
+        var n = 0
+        e.sets.forEachIndexed { si, st ->
+            if (st.kind != SET_WARMUP) n++
+            val sel = activeSet == si
+            val pr = isPr(st, best)
+            val tag = setTag(st.kind) ?: "$n"
+            Row(
+                Modifier.fillMaxWidth().padding(vertical = 3.dp).clip(RoundedCornerShape(16.dp))
+                    .background(if (sel) CardHigh else Color.Transparent)
+                    .then(if (sel) Modifier.border(1.5.dp, Accent, RoundedCornerShape(16.dp)) else Modifier)
+                    .clickable { Fx.tick(); onSelect(si) }.padding(horizontal = 6.dp, vertical = 6.dp)
+                    .graphicsLayer { alpha = if (st.kind == SET_WARMUP || (!st.done && !sel)) 0.6f else 1f },
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Box(Modifier.width(44.dp)) {
+                    if (pr) Glyph("record", Accent, 18.dp, "Récord")
+                    else Text(tag, fontFamily = Display, fontWeight = FontWeight.Bold, fontSize = 15.sp, color = if (st.kind == SET_FAILURE) Accent else Ink2)
+                }
+                Text(prev?.getOrNull(si)?.let { fmtSet(it).replace("×", " × ") } ?: "—", color = Muted, style = MaterialTheme.typography.bodySmall, modifier = Modifier.weight(1f))
+                val (v3, v4) = when (kind) {
+                    1 -> fmtSecs(st.seconds ?: 0) to ""
+                    2 -> fmtWeight(round1(st.km ?: 0.0)) to "${(st.seconds ?: 0) / 60}"
+                    else -> fmtWeight(st.weight) to "${st.reps}"
+                }
+                CellValue(v3, st.done, Modifier.width(70.dp))
+                CellValue(v4, st.done, Modifier.width(52.dp))
+                Spacer(Modifier.width(6.dp))
+                // Casilla de hecho
+                val fill by androidx.compose.animation.core.animateFloatAsState(if (st.done) 1f else 0f, label = "c")
+                Box(
+                    Modifier.size(38.dp).clip(RoundedCornerShape(12.dp)).background(Ink.copy(alpha = fill))
+                        .border(2.dp, Line.copy(alpha = 1f - fill), RoundedCornerShape(12.dp))
+                        .clickable(role = Role.Checkbox, onClickLabel = "Serie hecha") { onToggle(si) },
+                    contentAlignment = Alignment.Center,
+                ) { if (st.done) DrawnCheck(Bg, 18.dp, st.done) }
+            }
+            if (sel) InlineSetEditor(kind, st, onChange = { f -> onChange(si, f) }, onMore = { onMore(si) })
+        }
+        Spacer(Modifier.height(8.dp))
+        Row(
+            Modifier.fillMaxWidth().clip(RoundedCornerShape(50)).border(1.dp, Line, RoundedCornerShape(50)).clickable(onClick = onAdd).padding(vertical = 11.dp),
+            horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically,
+        ) { Glyph("mas", Ink2, 16.dp); Spacer(Modifier.width(6.dp)); Text("Serie", color = Ink2) }
+    }
+}
+
+@Composable
+private fun CellValue(v: String, done: Boolean, modifier: Modifier) {
+    Box(modifier.height(36.dp).padding(horizontal = 3.dp).clip(RoundedCornerShape(12.dp)).background(if (done || v.isEmpty()) Color.Transparent else Color(0xFF26262A)),
+        contentAlignment = Alignment.Center) {
+        Text(v, fontFamily = Display, fontWeight = FontWeight.Bold, fontSize = 16.sp, color = Ink)
+    }
+}
+
+/** Edición en línea de la serie seleccionada: sin ventanas emergentes. */
+@Composable
+private fun InlineSetEditor(kind: Int, st: WorkSet, onChange: ((WorkSet) -> WorkSet) -> Unit, onMore: () -> Unit) {
+    Column(Modifier.fillMaxWidth().padding(top = 4.dp, bottom = 6.dp).clip(RoundedCornerShape(20.dp)).background(CardHigh).padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            when (kind) {
+                1 -> PillStepper(fmtSecs(st.seconds ?: 0), "segundos", Modifier.weight(1f),
+                    { onChange { it.copy(seconds = ((it.seconds ?: 0) - 5).coerceAtLeast(0)) } }, { onChange { it.copy(seconds = (it.seconds ?: 0) + 5) } })
+                2 -> {
+                    PillStepper(fmtWeight(round1(st.km ?: 0.0)), "km", Modifier.weight(1f),
+                        { onChange { it.copy(km = round1(((it.km ?: 0.0) - 0.1).coerceAtLeast(0.0))) } }, { onChange { it.copy(km = round1((it.km ?: 0.0) + 0.1)) } })
+                    PillStepper("${(st.seconds ?: 0) / 60}", "min", Modifier.weight(1f),
+                        { onChange { it.copy(seconds = ((it.seconds ?: 0) - 60).coerceAtLeast(0)) } }, { onChange { it.copy(seconds = (it.seconds ?: 0) + 60) } })
+                }
+                else -> {
+                    PillStepper(fmtWeight(st.weight), "kg", Modifier.weight(1f),
+                        { onChange { it.copy(weight = round1((it.weight - 2.5).coerceAtLeast(0.0) * 100) / 100) } }, { onChange { it.copy(weight = it.weight + 2.5) } })
+                    PillStepper("${st.reps}", "reps", Modifier.weight(1f),
+                        { onChange { it.copy(reps = (it.reps - 1).coerceAtLeast(0)) } }, { onChange { it.copy(reps = it.reps + 1) } })
+                }
+            }
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(5.dp), verticalAlignment = Alignment.CenterVertically) {
+            SET_KINDS.forEachIndexed { i, k ->
+                val sel = st.kind == i
+                Box(Modifier.weight(1f).height(32.dp).clip(RoundedCornerShape(10.dp)).background(if (sel) Ink else Color(0xFF26262A))
+                    .clickable { Fx.tick(); onChange { it.copy(kind = i) } }, contentAlignment = Alignment.Center) {
+                    Text(k, color = if (sel) Bg else Ink2, style = MaterialTheme.typography.labelMedium, fontWeight = if (sel) FontWeight.Bold else FontWeight.Normal)
+                }
+            }
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(5.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text("Esfuerzo", color = Muted, style = MaterialTheme.typography.labelMedium, modifier = Modifier.padding(end = 4.dp))
+            (6..10).forEach { n ->
+                val sel = st.rpe == n
+                Box(Modifier.weight(1f).height(32.dp).clip(RoundedCornerShape(10.dp)).background(if (sel) Ink else Color(0xFF26262A))
+                    .clickable { Fx.tick(); onChange { it.copy(rpe = if (sel) null else n) } }, contentAlignment = Alignment.Center) {
+                    Text("$n", color = if (sel) Bg else Ink2, style = MaterialTheme.typography.labelLarge, fontWeight = if (sel) FontWeight.Bold else FontWeight.Normal)
+                }
+            }
+            Box(Modifier.size(32.dp).clip(RoundedCornerShape(10.dp)).background(Color(0xFF26262A)).clickable(onClickLabel = "Más opciones") { onMore() }, contentAlignment = Alignment.Center) {
+                Icon(Icons.Filled.MoreVert, "Más opciones", tint = Ink2, modifier = Modifier.size(18.dp))
+            }
+        }
+    }
+}
+
+@Composable
+private fun PillStepper(value: String, unit: String, modifier: Modifier, onMinus: () -> Unit, onPlus: () -> Unit) {
+    Row(modifier.clip(RoundedCornerShape(50)).background(CardBg).padding(4.dp), verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.size(40.dp).clip(CircleShape).background(Color(0xFF26262A)).clickable(onClickLabel = "Menos $unit") { Fx.tick(); onMinus() }, contentAlignment = Alignment.Center) {
+            Text("−", color = Ink, fontSize = 20.sp)
+        }
+        Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
+            RollingText(value, color = Ink, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+            Text(unit, color = Muted, style = MaterialTheme.typography.labelSmall)
+        }
+        Box(Modifier.size(40.dp).clip(CircleShape).background(Color(0xFF26262A)).clickable(onClickLabel = "Más $unit") { Fx.tick(); onPlus() }, contentAlignment = Alignment.Center) {
+            Text("+", color = Ink, fontSize = 20.sp)
+        }
     }
 }
 
@@ -480,7 +656,7 @@ private fun ExerciseNoteDialog(data: AppData, id: String, onDismiss: () -> Unit)
 /** Empieza un entrenamiento copiando ejercicios y series de una sesión anterior. */
 fun repeatWorkout(w: Workout) {
     GymUi.minimized = false
-    Repo.update { d -> d.copy(activeWorkout = Workout(date = today(), name = w.name, entries = w.entries.map { e -> e.copy(sets = e.sets.map { it.copy(rpe = null) }) })) }
+    Repo.update { d -> d.copy(activeWorkout = Workout(date = today(), name = w.name, entries = w.entries.map { e -> e.copy(sets = e.sets.map { it.copy(rpe = null, done = false) }) })) }
 }
 
 private fun Modifier.border1() = this.border(1.dp, Line, RoundedCornerShape(50))
@@ -592,7 +768,7 @@ private fun HistoryTab(data: AppData) {
                 Text("${monthWorkouts.map { it.date }.distinct().size} día(s) entrenados este mes", color = Muted, style = MaterialTheme.typography.bodySmall)
             }
         }
-        if (monthWorkouts.isEmpty()) item { EmptyState("📆", "Sin entrenamientos este mes", "Cuando termines uno aparecerá aquí.") }
+        if (monthWorkouts.isEmpty()) item { EmptyState("agenda", "Sin entrenamientos este mes", "Cuando termines uno aparecerá aquí.") }
         items(monthWorkouts, key = { it.id }) { w ->
             OdCard(onClick = { open = w }) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -673,7 +849,7 @@ private fun ProgressTab(data: AppData) {
     val withData = data.workouts.flatMap { w -> w.entries.filter { it.sets.isNotEmpty() }.map { it.exerciseId } }
         .groupingBy { it }.eachCount().entries.sortedByDescending { it.value }.map { it.key }
     if (withData.isEmpty()) {
-        EmptyState("📈", "Aún no hay progreso que mostrar", "Termina tu primer entrenamiento y aquí verás cómo suben tus pesos.")
+        EmptyState("grafica", "Aún no hay progreso que mostrar", "Termina tu primer entrenamiento y aquí verás cómo suben tus pesos.")
         return
     }
     var selected by rememberSaveable { mutableStateOf(withData.first()) }
@@ -686,7 +862,7 @@ private fun ProgressTab(data: AppData) {
         val sets = w.entries.filter { it.exerciseId == selected }.flatMap { it.sets }.filter { it.counts }
         if (sets.isEmpty()) null else Triple(w.date, sets.maxOf { metric(it) }, sets)
     }
-    if (points.isEmpty()) { EmptyState("📈", "Solo hay calentamientos", "Registra series normales para ver tu progreso."); return }
+    if (points.isEmpty()) { EmptyState("grafica", "Solo hay calentamientos", "Registra series normales para ver tu progreso."); return }
     val allSets = points.flatMap { it.third }
     val best = allSets.maxBy { metric(it) }
     val best1rm = allSets.maxOf { oneRm(it) }

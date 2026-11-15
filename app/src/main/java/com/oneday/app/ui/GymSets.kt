@@ -146,7 +146,7 @@ fun SetRow(index: Int, s: WorkSet, pr: Boolean, onClick: () -> Unit) {
                 else -> "${fmtWeight(s.weight)} kg"
             }, fontWeight = FontWeight.SemiBold, color = Ink,
         )
-        if (pr) { Spacer(Modifier.width(10.dp)); Text("🏆 Récord", color = Accent, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold) }
+        if (pr) { Spacer(Modifier.width(10.dp)); Glyph("record", Accent, 15.dp); Spacer(Modifier.width(4.dp)); Text("Récord", color = Accent, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold) }
         Spacer(Modifier.weight(1f))
         s.rpe?.let { Text("@$it", color = Muted, style = MaterialTheme.typography.bodySmall); Spacer(Modifier.width(10.dp)) }
         when {

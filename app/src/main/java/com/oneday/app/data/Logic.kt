@@ -54,7 +54,7 @@ fun atMillis(epochDay: Long, minutes: Int): Long =
     LocalDate.ofEpochDay(epochDay).atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli() + minutes * 60_000L
 
 /** Series que cuentan (el calentamiento no suma a volumen, repeticiones ni récords). */
-val WorkSet.counts get() = kind != SET_WARMUP
+val WorkSet.counts get() = kind != SET_WARMUP && done
 fun Workout.volume(): Double = entries.sumOf { e -> e.sets.filter { it.counts }.sumOf { it.weight * it.reps } }
 fun Workout.setCount(): Int = entries.sumOf { e -> e.sets.count { it.counts } }
 
@@ -258,4 +258,15 @@ fun cravingAlertTime(list: List<Craving>): Int? {
     val b = cravingBuckets(list)
     val peak = b.indices.maxBy { b[it] }
     return ((peak * 3 * 60) - 30 + 24 * 60) % (24 * 60)
+}
+
+
+/** Series planeadas para hoy a partir de la última sesión (el objetivo sube el peso si toca). */
+fun plannedSets(data: AppData, exerciseId: String): List<WorkSet> {
+    val last = lastSetsFor(data, exerciseId) ?: return emptyList()
+    val kind = data.exercises.firstOrNull { it.id == exerciseId }?.kind ?: 0
+    if (kind != 0) return last.map { it.copy(done = false, rpe = null) }
+    val top = last.maxOf { it.weight }
+    val target = suggestTarget(last)
+    return last.map { it.copy(weight = if (it.weight == top && target != null) target.weight else it.weight, done = false, rpe = null, kind = SET_NORMAL) }
 }

@@ -92,7 +92,7 @@ fun SosOverlay(streakId: String, onClose: () -> Unit) {
                 }
                 else -> {
                     val n = Repo.data.cravings.count { it.streakId == streakId }
-                    Text("💪", fontSize = 56.sp)
+                    IconChip("brazo", ChipState.Done, 72.dp)
                     Spacer(Modifier.height(12.dp))
                     Text("Antojo superado", color = Ink, fontSize = 30.sp, fontWeight = FontWeight.Bold)
                     Spacer(Modifier.height(6.dp))

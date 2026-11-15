@@ -32,6 +32,11 @@ object Repo {
                             else -> it
                         }
                     } + Defaults.exercises.filter { def -> def.id == "ex_bici" && m.exercises.none { it.id == def.id } })
+                    // v1.4: los emojis guardados pasan a ser íconos propios.
+                    m = m.copy(
+                        streaks = m.streaks.map { it.copy(emoji = com.oneday.app.ui.Glyphs.keyFor(it.emoji, "racha")) },
+                        habits = m.habits.map { it.copy(emoji = com.oneday.app.ui.Glyphs.keyFor(it.emoji, "hecho")) },
+                    )
                     _state.value = m
                 }
                 .onFailure { f.copyTo(File(f.parentFile, "data-corrupto.json"), overwrite = true) }

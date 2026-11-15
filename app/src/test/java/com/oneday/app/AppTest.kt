@@ -145,7 +145,7 @@ class AppTest {
                 WorkEntry("ex_plancha", listOf(WorkSet(0.0, 0, seconds = 75))))
         }) }
         shot("10_entrenando_series")
-        tap("Terminar")
+        tap("Terminar entrenamiento")
         check(Repo.data.activeWorkout == null && Repo.data.workouts.size == workouts.size + 1) { "No se guardó el entrenamiento" }
         nav("Hoy"); shot("11_hoy_final")
     }

@@ -17,6 +17,9 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
@@ -49,7 +52,7 @@ fun TasksScreen(data: AppData) {
 
     Column {
         val pending = data.tasks.count { !it.done }
-        ScreenTitle("Pendientes", if (pending == 0) "Todo al día ✨" else "$pending por hacer") {
+        ScreenTitle("Pendientes", if (pending == 0) "Todo al día" else "$pending por hacer") {
             CircleButton("Nuevo pendiente", accent = true, onClick = { creating = true }) { Icon(Icons.Filled.Add, null, tint = Bg) }
         }
         Segmented(listOf("Por hacer", "Hoy", "Hechos"), filter, { filter = it }, Modifier.padding(horizontal = 16.dp))
@@ -76,7 +79,7 @@ fun TasksScreen(data: AppData) {
 
         if (groups.isEmpty()) {
             EmptyState(
-                if (filter == 2) "📭" else "✅",
+                if (filter == 2) "sobre" else "pendientes",
                 if (filter == 2) "Aún no completas nada" else "No hay pendientes",
                 if (filter == 2) "Cuando marques una tarea aparecerá aquí." else "Toca el botón + para agregar uno.",
             )
@@ -138,14 +141,19 @@ fun SwipeTask(task: Task, content: @Composable () -> Unit) {
         backgroundContent = {
             val dir = state.dismissDirection
             val right = dir == SwipeToDismissBoxValue.StartToEnd
+            // Umbral cruzado: el fondo se aclara de golpe, el ícono crece y suena un "tic".
+            val armed = state.targetValue != SwipeToDismissBoxValue.Settled
+            LaunchedEffect(armed) { if (armed) Fx.tick() }
+            val scale by animateFloatAsState(if (armed) 1.2f else 1f, label = "swipe")
             Box(
-                Modifier.fillMaxSize().clip(RoundedCornerShape(24.dp)).background(if (right) Ink2 else CardHigh).padding(horizontal = 24.dp),
+                Modifier.fillMaxSize().clip(RoundedCornerShape(24.dp))
+                    .background(if (right) (if (armed) Ink2 else Color(0xFF3A3A3F)) else (if (armed) Color(0xFF34343A) else CardHigh)).padding(horizontal = 24.dp),
                 contentAlignment = if (right) Alignment.CenterStart else Alignment.CenterEnd,
             ) {
-                if (dir == SwipeToDismissBoxValue.StartToEnd) Row(verticalAlignment = Alignment.CenterVertically) {
-                    OdIcon(R.drawable.ic_check, Bg, 22.dp); Spacer(Modifier.width(8.dp)); Text(if (task.done) "Reabrir" else "Hecho", color = Bg, fontWeight = FontWeight.SemiBold)
+                if (dir == SwipeToDismissBoxValue.StartToEnd) Row(Modifier.graphicsLayer { scaleX = scale; scaleY = scale }, verticalAlignment = Alignment.CenterVertically) {
+                    Glyph("hecho", if (armed) Bg else Ink2, 22.dp); Spacer(Modifier.width(8.dp)); Text(if (task.done) "Reabrir" else "Hecho", color = if (armed) Bg else Ink2, fontWeight = FontWeight.SemiBold)
                 }
-                if (dir == SwipeToDismissBoxValue.EndToStart) Text("Mañana →", color = Ink, fontWeight = FontWeight.SemiBold)
+                if (dir == SwipeToDismissBoxValue.EndToStart) Row(Modifier.graphicsLayer { scaleX = scale; scaleY = scale }, verticalAlignment = Alignment.CenterVertically) { Text("Mañana", color = Ink, fontWeight = FontWeight.SemiBold); Spacer(Modifier.width(8.dp)); Glyph("flecha", Ink, 22.dp) }
             }
         },
     ) { content() }

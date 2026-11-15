@@ -27,8 +27,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.oneday.app.data.*
 
-private val QUIT = listOf("🚭" to "Fumar", "🍺" to "Alcohol", "🥤" to "Refresco", "📱" to "Redes sociales", "🍬" to "Azúcar")
-private val BUILD = listOf("💧" to "Tomar 2 L de agua", "📖" to "Leer 20 minutos", "🧘" to "Meditar", "🚶" to "Caminar 30 minutos", "😴" to "Dormir 8 horas")
+private val QUIT = listOf("fumar" to "Fumar", "alcohol" to "Alcohol", "refresco" to "Refresco", "redes" to "Redes sociales", "azucar" to "Azúcar")
+private val BUILD = listOf("agua" to "Tomar 2 L de agua", "leer" to "Leer 20 minutos", "meditar" to "Meditar", "caminar" to "Caminar 30 minutos", "dormir" to "Dormir 8 horas")
 
 /** Bienvenida de 3 pasos: nombre, gimnasio y qué quieres cambiar. */
 @Composable
@@ -103,11 +103,11 @@ fun Onboarding(onDone: () -> Unit) {
                         Spacer(Modifier.height(20.dp))
                         Text("DEJAR", color = Faint, style = MaterialTheme.typography.labelMedium, letterSpacing = 1.2.sp)
                         Spacer(Modifier.height(8.dp))
-                        QUIT.forEach { (e, n) -> ChoicePill("$e  $n", n in quit, Modifier.fillMaxWidth().padding(vertical = 3.dp)) { if (n in quit) quit.remove(n) else quit.add(n) } }
+                        QUIT.forEach { (e, n) -> ChoicePill(n, n in quit, Modifier.fillMaxWidth().padding(vertical = 3.dp), lead = { Glyph(e, if (n in quit) Bg else Ink2, 18.dp) }) { if (n in quit) quit.remove(n) else quit.add(n) } }
                         Spacer(Modifier.height(18.dp))
                         Text("CONSTRUIR", color = Faint, style = MaterialTheme.typography.labelMedium, letterSpacing = 1.2.sp)
                         Spacer(Modifier.height(8.dp))
-                        BUILD.forEach { (e, n) -> ChoicePill("$e  $n", n in build, Modifier.fillMaxWidth().padding(vertical = 3.dp)) { if (n in build) build.remove(n) else build.add(n) } }
+                        BUILD.forEach { (e, n) -> ChoicePill(n, n in build, Modifier.fillMaxWidth().padding(vertical = 3.dp), lead = { Glyph(e, if (n in build) Bg else Ink2, 18.dp) }) { if (n in build) build.remove(n) else build.add(n) } }
                     }
                 }
             }

@@ -122,7 +122,7 @@ object Notifier {
         when (type) {
             "task" -> {
                 val task = d.tasks.firstOrNull { it.id == id } ?: return
-                if (!task.done) show(ctx, task.id.hashCode(), "⏰ ${task.title}", task.notes.ifBlank { "Es hora de tu pendiente." },
+                if (!task.done) show(ctx, task.id.hashCode(), task.title, task.notes.ifBlank { "Es hora de tu pendiente." },
                     listOf(Action("Hecho", "act_done", task.id), Action("Posponer 1 h", "act_snooze", task.id)))
             }
             "summary" -> {
@@ -130,24 +130,24 @@ object Notifier {
                 val overdue = d.tasks.count { !it.done && it.date != null && it.date < t }
                 if (todays.isNotEmpty() || overdue > 0) {
                     val list = todays.take(4).joinToString("\n") { "• ${it.title}" }
-                    val extra = if (overdue > 0) "\n⚠️ $overdue pendiente(s) atrasado(s)" else ""
-                    show(ctx, REQ_SUMMARY, "☀️ Tu día: ${todays.size} pendiente(s) para hoy", (list + extra).trim())
+                    val extra = if (overdue > 0) "\nY $overdue pendiente(s) atrasado(s)" else ""
+                    show(ctx, REQ_SUMMARY, "Tu día: ${todays.size} pendiente(s) para hoy", (list + extra).trim())
                 } else {
-                    show(ctx, REQ_SUMMARY, "☀️ Buen día", "No tienes pendientes para hoy. ¡Aprovecha para planear tu día!")
+                    show(ctx, REQ_SUMMARY, "Buen día", "No tienes pendientes para hoy. ¡Aprovecha para planear tu día!")
                 }
             }
             "gym" -> {
                 val dow = LocalDate.now().dayOfWeek.value
                 val trainedToday = d.workouts.any { it.date == t }
                 if (dow in d.settings.gymDays && !trainedToday)
-                    show(ctx, REQ_GYM, "🏋️ Hora del gimnasio", "Hoy toca entrenar. ¡Un día a la vez!")
+                    show(ctx, REQ_GYM, "Hora del gimnasio", "Hoy toca entrenar. ¡Un día a la vez!")
             }
             "habit" -> {
                 val h = d.habits.firstOrNull { it.id == id } ?: return
                 if (t !in h.doneDays) {
                     val streak = habitStreak(h)
                     val progress = h.target?.let { " Vas ${h.countToday()}/$it ${h.unit}." } ?: ""
-                    show(ctx, ("h" + h.id).hashCode(), "${h.emoji} ${h.name}",
+                    show(ctx, ("h" + h.id).hashCode(), h.name,
                         (if (streak > 0) "Llevas $streak día(s) seguidos. Márcalo hoy para no romper la racha." else "Hoy es buen día para empezar.") + progress,
                         listOf(Action("Hecho hoy", "act_habit", h.id)))
                 }
@@ -155,7 +155,7 @@ object Notifier {
             "craving" -> {
                 val alert = cravingAlertTime(d.cravings) ?: return
                 val peak = (alert + 30) / 180
-                show(ctx, REQ_CRAVING, "🫁 Se acerca tu hora difícil", "Sueles tener antojos entre ${bucketLabel(peak % 8)}. Si llegan, abre One Day y respira 60 segundos.")
+                show(ctx, REQ_CRAVING, "Se acerca tu hora difícil", "Sueles tener antojos entre ${bucketLabel(peak % 8)}. Si llegan, abre One Day y respira 60 segundos.")
             }
             // Botones de las notificaciones
             "act_done" -> {
@@ -179,7 +179,7 @@ object Notifier {
                 d.streaks.forEach { s ->
                     val days = streakDays(s)
                     if (days in MILESTONES)
-                        show(ctx, s.id.hashCode(), "🔥 ¡$days día(s) sin ${s.name.lowercase()}!", "Llevas $days día(s). Sigue así, vas muy bien.")
+                        show(ctx, s.id.hashCode(), "¡$days día(s) sin ${s.name.lowercase()}!", "Llevas $days día(s). Sigue así, vas muy bien.")
                 }
             }
         }

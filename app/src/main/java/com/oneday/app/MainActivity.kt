@@ -44,6 +44,9 @@ class MainActivity : ComponentActivity() {
 
                 // Cada vez que cambian tareas, rachas o ajustes, se reprograman los recordatorios.
                 LaunchedEffect(data.tasks, data.settings, data.streaks.size, data.habits, data.cravings.size) { Notifier.rescheduleAll(this@MainActivity) }
+                // Medallas nuevas de rachas y hábitos (al abrir y cada minuto)
+                val nowTick = rememberNow()
+                LaunchedEffect(nowTick, data.habits) { checkNewMedals() }
                 val view = LocalView.current
                 DisposableEffect(view) { Fx.view = view; onDispose { Fx.view = null } }
 
@@ -63,6 +66,7 @@ class MainActivity : ComponentActivity() {
                         }
                     }
                     UndoBar(Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(bottom = 92.dp))
+                    MedalToast(Modifier.align(Alignment.TopCenter).statusBarsPadding().padding(top = 8.dp))
                     AnimatedVisibility(
                         visible = !(UiState.hideNav && tab == 3) && UiState.sosStreak == null,
                         enter = fadeIn() + slideInVertically { it }, exit = fadeOut() + slideOutVertically { it },

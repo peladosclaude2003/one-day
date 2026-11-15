@@ -28,13 +28,13 @@ fun SettingsDialog(data: AppData, onDismiss: () -> Unit) {
     val exporter = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/json")) { uri ->
         if (uri != null) runCatching {
             ctx.contentResolver.openOutputStream(uri)!!.use { it.write(Repo.exportJson().toByteArray()) }
-        }.onSuccess { Toast.makeText(ctx, "Copia guardada ✅", Toast.LENGTH_SHORT).show() }
+        }.onSuccess { Toast.makeText(ctx, "Copia guardada", Toast.LENGTH_SHORT).show() }
             .onFailure { Toast.makeText(ctx, "No se pudo guardar la copia", Toast.LENGTH_LONG).show() }
     }
     val importer = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
             val ok = runCatching { ctx.contentResolver.openInputStream(uri)!!.use { it.readBytes().decodeToString() } }.getOrNull()?.let { Repo.importJson(it) } ?: false
-            Toast.makeText(ctx, if (ok) "Datos restaurados ✅" else "Ese archivo no es una copia válida de One Day", Toast.LENGTH_LONG).show()
+            Toast.makeText(ctx, if (ok) "Datos restaurados" else "Ese archivo no es una copia válida de One Day", Toast.LENGTH_LONG).show()
         }
     }
 

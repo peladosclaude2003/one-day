@@ -5,6 +5,7 @@ import android.os.Build
 import android.view.HapticFeedbackConstants
 import android.view.View
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
@@ -67,9 +68,12 @@ val Line = Color(0xFF2C2C30)
 val Ink = Color(0xFFF2F2F3)
 val Ink2 = Color(0xFFD6D6D9)
 val Muted = Color(0xFF8E8E93)
-val Faint = Color(0xFF5C5C62)
+val Faint = Color(0xFF7C7C82) // sube de #5C5C62 para cumplir 4.5:1 sobre tarjeta
 // 10 % resaltado
 val Accent = Color(0xFFFF7A1A)
+val AccentSoft = Color(0xFF3B2414)  // naranja al ~15 % para fondos de chips activos
+val AccentText = Color(0xFFFF9A4D)  // naranja legible sobre AccentSoft
+val Hairline = Color(0x0FFFFFFF)    // filo de 1 px blanco al 6 %
 // Semánticos (uso mínimo)
 val Good = Color(0xFF3DD68C)
 val Bad = Color(0xFFFF6B6B)
@@ -91,7 +95,13 @@ private val Scheme = darkColorScheme(
     error = Bad,
 )
 
-// ============ Tipografía: Inter con números de ancho fijo ============
+// ============ Tipografía en dos voces ============
+/** Space Grotesk: solo cifras grandes y títulos de pantalla. */
+val Display = FontFamily(
+    Font(R.font.space_grotesk_medium, FontWeight.Medium),
+    Font(R.font.space_grotesk_bold, FontWeight.Bold),
+)
+
 val Inter = FontFamily(
     Font(R.font.inter_regular, FontWeight.Normal),
     Font(R.font.inter_medium, FontWeight.Medium),
@@ -103,7 +113,9 @@ private fun TextStyle.inter() = copy(fontFamily = Inter, fontFeatureSettings = "
 private val base = Typography()
 private val AppTypography = Typography(
     displayLarge = base.displayLarge.inter(), displayMedium = base.displayMedium.inter(), displaySmall = base.displaySmall.inter(),
-    headlineLarge = base.headlineLarge.inter(), headlineMedium = base.headlineMedium.inter().copy(letterSpacing = (-0.5).sp), headlineSmall = base.headlineSmall.inter(),
+    headlineLarge = base.headlineLarge.copy(fontFamily = Display, fontWeight = FontWeight.Bold),
+    headlineMedium = base.headlineMedium.copy(fontFamily = Display, fontWeight = FontWeight.Bold, fontSize = 30.sp, letterSpacing = (-0.8).sp),
+    headlineSmall = base.headlineSmall.inter(),
     titleLarge = base.titleLarge.inter(), titleMedium = base.titleMedium.inter(), titleSmall = base.titleSmall.inter(),
     bodyLarge = base.bodyLarge.inter(), bodyMedium = base.bodyMedium.inter(), bodySmall = base.bodySmall.inter(),
     labelLarge = base.labelLarge.inter(), labelMedium = base.labelMedium.inter(), labelSmall = base.labelSmall.inter(),
@@ -139,6 +151,7 @@ object UiState {
     var blurCount by mutableIntStateOf(0)
     var hideNav by mutableStateOf(false)
     var sosStreak by mutableStateOf<String?>(null)
+    var medal by mutableStateOf<MedalMsg?>(null)
     /** Aviso con "Deshacer" que se muestra 4 segundos. */
     var undo by mutableStateOf<Undo?>(null)
     fun showUndo(text: String, action: () -> Unit) { undo = Undo(text, action, System.nanoTime()) }
@@ -173,7 +186,8 @@ fun OdCard(
     content: @Composable ColumnScope.() -> Unit,
 ) {
     Column(
-        modifier.fillMaxWidth().pressClick(onClick).clip(RoundedCornerShape(28.dp)).background(color).padding(padding),
+        modifier.fillMaxWidth().pressClick(onClick).clip(RoundedCornerShape(28.dp)).background(color)
+            .border(1.dp, Hairline, RoundedCornerShape(28.dp)).padding(padding),
         content = content,
     )
 }
@@ -244,7 +258,7 @@ fun Pill(text: String, color: Color = Muted) {
 
 /** Botón principal blanco tipo píldora (color de contraste). */
 @Composable
-fun PrimaryButton(text: String, modifier: Modifier = Modifier, @DrawableRes icon: Int? = null, enabled: Boolean = true, onClick: () -> Unit) {
+fun PrimaryButton(text: String, modifier: Modifier = Modifier, @DrawableRes icon: Int? = null, enabled: Boolean = true, glyph: String? = null, onClick: () -> Unit) {
     Button(
         onClick = onClick, enabled = enabled,
         modifier = modifier.fillMaxWidth().height(58.dp),
@@ -252,7 +266,8 @@ fun PrimaryButton(text: String, modifier: Modifier = Modifier, @DrawableRes icon
         colors = ButtonDefaults.buttonColors(containerColor = Ink, contentColor = Bg, disabledContainerColor = CardHigh, disabledContentColor = Faint),
     ) {
         if (icon != null) { Icon(painterResource(icon), null, tint = Color.Unspecified, modifier = Modifier.size(24.dp)); Spacer(Modifier.width(12.dp)) }
-        Text(text, fontWeight = FontWeight.SemiBold, fontSize = 17.sp)
+        if (glyph != null) { Glyph(glyph, if (enabled) Bg else Faint, 20.dp); Spacer(Modifier.width(8.dp)) }
+        Text(text, fontWeight = FontWeight.SemiBold, fontSize = 16.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
 
@@ -278,7 +293,7 @@ fun CircleButton(desc: String, accent: Boolean = false, onClick: () -> Unit, ico
 @Composable
 fun StatTile(@DrawableRes icon: Int, value: String, label: String, modifier: Modifier = Modifier, delta: String? = null, deltaGood: Boolean = true, valueColor: Color = Ink, onClick: (() -> Unit)? = null) {
     Box(
-        modifier.pressClick(onClick).clip(RoundedCornerShape(28.dp)).background(CardBg).padding(vertical = 18.dp, horizontal = 10.dp),
+        modifier.pressClick(onClick).clip(RoundedCornerShape(28.dp)).background(CardBg).border(1.dp, Hairline, RoundedCornerShape(28.dp)).padding(vertical = 18.dp, horizontal = 10.dp),
     ) {
         if (delta != null) Text(delta, color = if (deltaGood) Good else Bad, style = MaterialTheme.typography.labelMedium, modifier = Modifier.align(Alignment.TopEnd))
         Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
@@ -320,7 +335,7 @@ fun RoundCheck(checked: Boolean, onToggle: () -> Unit, desc: String) {
     ) {
         Box(Modifier.size(26.dp).clip(CircleShape).border(2.dp, Faint.copy(alpha = 1f - fill), CircleShape), contentAlignment = Alignment.Center) {
             Box(Modifier.size(26.dp).graphicsLayer { scaleX = fill; scaleY = fill }.clip(CircleShape).background(Ink), contentAlignment = Alignment.Center) {
-                if (fill > 0.3f) OdIcon(R.drawable.ic_check, Bg, 16.dp)
+                if (checked) DrawnCheck(Bg, 16.dp, checked)
             }
         }
     }
@@ -336,10 +351,21 @@ object Fx {
         if (!s.hapticsOn) return
         view?.performHapticFeedback(if (s.hapticStrong) strong else soft, HapticFeedbackConstants.FLAG_IGNORE_VIEW_SETTING)
     }
+    /** Tic leve: tocar una tarjeta, cruzar el umbral al deslizar. */
     fun tick() = go(HapticFeedbackConstants.CLOCK_TICK, HapticFeedbackConstants.VIRTUAL_KEY)
+    /** Confirmación: marcar hecho. */
     fun success() = go(
         if (Build.VERSION.SDK_INT >= 30) HapticFeedbackConstants.CONFIRM else HapticFeedbackConstants.VIRTUAL_KEY,
         HapticFeedbackConstants.LONG_PRESS,
+    )
+    /** Doble pulso: récord personal. */
+    fun pr() { success(); view?.postDelayed({ success() }, 120) }
+    /** Éxito largo: nueva medalla. */
+    fun medal() { go(HapticFeedbackConstants.LONG_PRESS, HapticFeedbackConstants.LONG_PRESS); view?.postDelayed({ success() }, 180) }
+    /** Rechazo corto: eliminar o error. */
+    fun reject() = go(
+        if (Build.VERSION.SDK_INT >= 30) HapticFeedbackConstants.REJECT else HapticFeedbackConstants.VIRTUAL_KEY,
+        if (Build.VERSION.SDK_INT >= 30) HapticFeedbackConstants.REJECT else HapticFeedbackConstants.LONG_PRESS,
     )
 }
 
@@ -355,19 +381,28 @@ fun Modifier.pressClick(onClick: (() -> Unit)?): Modifier {
         .clickable(interactionSource = source, indication = null) { Fx.tick(); onClick() }
 }
 
-/** Texto cuyos números ruedan al cambiar (si está activado en Ajustes). */
+/** Cifra que rueda al cambiar: solo gira el dígito que cambia (si está activado en Ajustes). */
 @Composable
 fun RollingText(text: String, color: Color = Ink, fontSize: TextUnit = TextUnit.Unspecified, fontWeight: FontWeight? = null, lineHeight: TextUnit = TextUnit.Unspecified) {
     val s = Repo.data.settings
+    val family = if (fontSize != TextUnit.Unspecified && fontSize.value >= 20f) Display else null
     if (!s.rollingNumbersOn || !s.animationsOn) {
-        Text(text, color = color, fontSize = fontSize, fontWeight = fontWeight, maxLines = 1, lineHeight = lineHeight); return
+        Text(text, color = color, fontSize = fontSize, fontWeight = fontWeight, maxLines = 1, lineHeight = lineHeight, fontFamily = family); return
     }
-    AnimatedContent(
-        targetState = text,
-        transitionSpec = {
-            (slideInVertically(tween(260)) { it } + fadeIn(tween(260))) togetherWith (slideOutVertically(tween(260)) { -it } + fadeOut(tween(200)))
-        }, label = "roll",
-    ) { Text(it, color = color, fontSize = fontSize, fontWeight = fontWeight, maxLines = 1, lineHeight = lineHeight) }
+    Row {
+        // Se alinea por la derecha para que unidades, decenas… conserven su lugar.
+        val chars = text.toList()
+        chars.forEachIndexed { i, ch ->
+            key(chars.size - i) {
+                AnimatedContent(
+                    targetState = ch,
+                    transitionSpec = {
+                        (slideInVertically(tween(260)) { it } + fadeIn(tween(260))) togetherWith (slideOutVertically(tween(260)) { -it } + fadeOut(tween(200)))
+                    }, label = "digit",
+                ) { c -> Text(c.toString(), color = color, fontSize = fontSize, fontWeight = fontWeight, maxLines = 1, lineHeight = lineHeight, fontFamily = family) }
+            }
+        }
+    }
 }
 
 /** Confeti naranja y blanco que cae una vez (récords y metas). Cambia `trigger` para lanzarlo. */
@@ -395,22 +430,25 @@ fun Confetti(trigger: Int, modifier: Modifier = Modifier) {
 }
 private operator fun FloatArray.component6() = this[5]
 
-/** Menú inferior flotante, semitransparente, solo íconos. */
+/** Menú inferior flotante, de vidrio. La pestaña activa se abre y muestra su nombre. */
 @Composable
 fun FloatingNav(selected: Int, onSelect: (Int) -> Unit, modifier: Modifier = Modifier) {
-    val items = listOf(R.drawable.ic_nav_today to "Hoy", R.drawable.ic_nav_tasks to "Pendientes", R.drawable.ic_nav_flame to "Rachas", R.drawable.ic_nav_gym to "Gym")
+    val items = listOf("madrugar" to "Hoy", "pendientes" to "Pendientes", "racha" to "Rachas", "gym" to "Gym")
     Row(
-        modifier.clip(RoundedCornerShape(50)).background(Glass).border(1.dp, Color.White.copy(alpha = 0.07f), RoundedCornerShape(50)).padding(6.dp),
-        horizontalArrangement = Arrangement.spacedBy(2.dp),
+        modifier.clip(RoundedCornerShape(50)).background(Glass).border(1.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(50)).padding(6.dp),
+        horizontalArrangement = Arrangement.spacedBy(2.dp), verticalAlignment = Alignment.CenterVertically,
     ) {
-        items.forEachIndexed { i, (icon, desc) ->
+        items.forEachIndexed { i, (icon, label) ->
             val sel = i == selected
-            Box(
-                Modifier.size(width = 64.dp, height = 52.dp).clip(RoundedCornerShape(50))
-                    .background(if (sel) Color(0xFF2E2E33) else Color.Transparent)
-                    .clickable(role = Role.Tab, onClickLabel = desc) { onSelect(i) },
-                contentAlignment = Alignment.Center,
-            ) { OdIcon(icon, if (sel) Accent else Muted, 24.dp, desc) }
+            Row(
+                Modifier.height(50.dp).clip(RoundedCornerShape(50)).background(if (sel) AccentSoft else Color.Transparent)
+                    .clickable(role = Role.Tab, onClickLabel = label) { Fx.tick(); onSelect(i) }
+                    .animateContentSize().padding(horizontal = if (sel) 16.dp else 15.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Glyph(icon, if (sel) Accent else Muted, 22.dp, label)
+                if (sel) { Spacer(Modifier.width(8.dp)); Text(label, color = AccentText, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.labelLarge) }
+            }
         }
     }
 }
@@ -462,9 +500,11 @@ fun ScreenTitle(title: String, subtitle: String? = null, action: (@Composable ()
 }
 
 @Composable
-fun EmptyState(emoji: String, title: String, subtitle: String, modifier: Modifier = Modifier) {
+fun EmptyState(icon: String, title: String, subtitle: String, modifier: Modifier = Modifier) {
     Column(modifier.fillMaxWidth().padding(vertical = 40.dp, horizontal = 24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-        Text(emoji, fontSize = 44.sp)
+        Box(Modifier.size(84.dp).clip(RoundedCornerShape(27.dp)).background(CardBg).border(1.dp, Hairline, RoundedCornerShape(27.dp)), contentAlignment = Alignment.Center) {
+            Glyph(icon, Muted, 38.dp)
+        }
         Spacer(Modifier.height(12.dp))
         Text(title, style = MaterialTheme.typography.titleMedium, textAlign = TextAlign.Center, color = Ink)
         Spacer(Modifier.height(4.dp))
@@ -534,5 +574,28 @@ fun ChoicePill(text: String, selected: Boolean, modifier: Modifier = Modifier, l
     ) {
         if (lead != null) { lead(); Spacer(Modifier.width(6.dp)) }
         Text(text, color = if (selected) Bg else Ink2, style = MaterialTheme.typography.bodyMedium, fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal, maxLines = 1)
+    }
+}
+
+
+/** Clic sin efecto de onda (para fichas pequeñas). */
+@Composable
+fun Modifier.clickableNoRipple(onClick: () -> Unit): Modifier =
+    this.clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { Fx.tick(); onClick() }
+
+
+/** Palomita que se "dibuja" de izquierda a derecha (si las animaciones están activas). */
+@Composable
+fun DrawnCheck(color: Color, size: Dp, checked: Boolean) {
+    val anim = Repo.data.settings.animationsOn
+    val p = remember { Animatable(if (anim) 0f else 1f) }
+    LaunchedEffect(checked) { if (checked && anim) { p.snapTo(0f); p.animateTo(1f, tween(220, delayMillis = 60)) } else p.snapTo(1f) }
+    Canvas(Modifier.size(size)) {
+        val s = this.size.width / 24f
+        val path = androidx.compose.ui.graphics.Path().apply { moveTo(5f * s, 12.5f * s); lineTo(9.5f * s, 17f * s); lineTo(19f * s, 7.5f * s) }
+        val measure = androidx.compose.ui.graphics.PathMeasure().apply { setPath(path, false) }
+        val seg = androidx.compose.ui.graphics.Path()
+        measure.getSegment(0f, measure.length * p.value, seg, true)
+        drawPath(seg, color, style = androidx.compose.ui.graphics.drawscope.Stroke(2.8f * s, cap = androidx.compose.ui.graphics.StrokeCap.Round, join = androidx.compose.ui.graphics.StrokeJoin.Round))
     }
 }
