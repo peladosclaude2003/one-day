@@ -77,10 +77,12 @@ object Glyphs {
         G("mas", "Agregar", "M12 5v14 M5 12h14"),
         G("cerrar", "Cerrar", "M6 6l12 12 M18 6L6 18"),
         G("editar", "Editar", "M4 20l1-4L16 5a2 2 0 0 1 3 3L8 19z"),
+        G("repetir", "Repetir", "M4 12a8 8 0 0 1 14-5.3 M18 3v4h-4 M20 12a8 8 0 0 1-14 5.3 M6 21v-4h4"),
+        G("pasos", "Pasos", "M8 3.5c1.8 0 2.7 2 2.7 4.5S9.6 12 8.2 12 5.5 10.6 5.5 8 6.2 3.5 8 3.5z M6 14.5h4.5l-.3 2a2.2 2.2 0 0 1-4.3-.2z M16 8.5c1.8 0 2.5 4.5 2.5 6.5s-1.3 4-2.7 4-2.5-1.5-2.5-4 .9-6.5 2.7-6.5z M13.5 20.5H18"),
     )
     /** Íconos que el usuario puede elegir para rachas (dejar) y hábitos (construir). */
     val PICKABLE_QUIT = QUIT + BUILD.filter { it.key in setOf("dormir", "sano") }
-    val PICKABLE_BUILD = BUILD + SYSTEM.filter { it.key in setOf("brazo", "gym", "hecho", "brote") }
+    val PICKABLE_BUILD = BUILD + SYSTEM.filter { it.key in setOf("brazo", "gym", "hecho", "brote", "pasos") }
 
     private val all = (QUIT + BUILD + SYSTEM).associateBy { it.key }
     private val cache = HashMap<String, ImageVector>()

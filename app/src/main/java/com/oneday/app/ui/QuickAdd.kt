@@ -36,7 +36,7 @@ fun QuickAddSheet(defaultDate: Long?, onDismiss: () -> Unit) {
         if (p.daily) {
             Repo.update { d -> d.copy(habits = d.habits + Habit(name = p.title, emoji = "hecho", createdDay = today(), remindAt = p.time)) }
         } else {
-            saveTask(Task(title = p.title, date = date, time = p.time, priority = p.priority ?: 1, remind = date != null && p.time != null, area = p.area))
+            saveTask(Task(title = p.title, date = date, time = p.time, priority = p.priority ?: 1, remind = date != null && p.time != null, area = p.area, repeat = p.repeat))
         }
         Fx.success()
         onDismiss()
@@ -64,14 +64,15 @@ fun QuickAddSheet(defaultDate: Long?, onDismiss: () -> Unit) {
             p.time?.let { InfoPill(fmtTime(it), R.drawable.ic_clock) }
             if (p.priority != null) InfoPill(priorityName(p.priority))
             p.area?.let { InfoPill(it) }
+            p.repeat?.let { InfoPill(repeatLabel(it)) }
         }
         Spacer(Modifier.height(10.dp))
-        Text("Puedes escribir: hoy, mañana, viernes, en 3 días, 15 de dic · 10am, a las 5, 8 de la noche · !alta, !baja · #${areas.firstOrNull()?.lowercase() ?: "trabajo"} · cada día",
+        Text("Puedes escribir: hoy, mañana, viernes, en 3 días, 15 de dic · 10am, a las 5, 8 de la noche · !alta, !baja · #${areas.firstOrNull()?.lowercase() ?: "trabajo"} · diario, cada lunes, cada mes",
             color = Faint, style = MaterialTheme.typography.bodySmall)
         Spacer(Modifier.height(20.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             SecondaryButton("Más opciones", Modifier.weight(1f), color = Ink2) {
-                more = Task(title = p.title, date = date, time = p.time, priority = p.priority ?: 1, remind = date != null && p.time != null, area = p.area)
+                more = Task(title = p.title, date = date, time = p.time, priority = p.priority ?: 1, remind = date != null && p.time != null, area = p.area, repeat = p.repeat)
             }
             PrimaryButton(if (p.daily) "Crear hábito" else "Guardar", Modifier.weight(1.3f), enabled = p.title.isNotBlank()) { save() }
         }

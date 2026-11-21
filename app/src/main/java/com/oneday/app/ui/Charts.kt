@@ -221,12 +221,12 @@ fun LineChart(points: List<Pair<Long, Double>>, unit: String = "kg", fmt: (Doubl
 
 /** Barras simples con etiqueta abajo; la barra `highlight` va en naranja. */
 @Composable
-fun Bars(values: List<Int>, labels: List<String>, highlight: Int? = null, barArea: Dp = 90.dp) {
+fun Bars(values: List<Int>, labels: List<String>, highlight: Int? = null, barArea: Dp = 90.dp, showValues: Boolean = true) {
     val maxV = (values.maxOrNull() ?: 0).coerceAtLeast(1)
     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.Bottom) {
         values.forEachIndexed { i, v ->
             Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
-                if (v > 0) Text("$v", color = Muted, style = MaterialTheme.typography.labelSmall)
+                if (v > 0 && showValues) Text("$v", color = Muted, style = MaterialTheme.typography.labelSmall)
                 Box(Modifier.height(barArea).fillMaxWidth(), contentAlignment = Alignment.BottomCenter) {
                     if (v > 0) Box(Modifier.fillMaxWidth().fillMaxHeight(v / maxV.toFloat()).clip(RoundedCornerShape(8.dp))
                         .background(if (i == highlight) Accent else Color(0xFF3A3A3F)))

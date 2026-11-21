@@ -18,7 +18,16 @@ data class Task(
     val remind: Boolean = false,
     val doneAt: Long? = null,
     val area: String? = null,
+    val repeat: Repeat? = null,   // null = no se repite
+    val nextId: String? = null,   // la siguiente repetición que creó al marcarse hecho
 )
+
+/**
+ * Repetición de un pendiente.
+ * kind: "day" cada N días · "week" días de la semana (1 = lunes … 7 = domingo) · "month" el mismo día cada mes · "year" cada año.
+ */
+@Serializable
+data class Repeat(val kind: String, val every: Int = 1, val days: Set<Int> = emptySet())
 
 /** Racha: días sin un vicio. `start` = momento (millis) desde el que se cuenta. */
 @Serializable
@@ -89,6 +98,7 @@ data class Habit(
     val unit: String = "",            // vasos, min, páginas…
     val step: Int = 1,                // cuánto suma cada toque
     val counts: Map<Long, Int> = emptyMap(), // día → cantidad
+    val source: String? = null,       // "steps" = se llena solo con tus pasos
 )
 
 /** Antojo superado con el botón SOS. */
@@ -121,6 +131,9 @@ data class Settings(
     val barKg: Double = 20.0,
     val plates: List<Double> = listOf(25.0, 20.0, 15.0, 10.0, 5.0, 2.5, 1.25),
     val seenMedals: Set<String> = emptySet(),
+    val weightStep: Double = 1.0,     // cuánto suman los botones − / + del peso
+    val stepsAsked: Boolean = false,  // ya se ofreció conectar los pasos
+    val stepsGoalDismissedAt: Long = 0,
 )
 
 @Serializable

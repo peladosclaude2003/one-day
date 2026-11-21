@@ -29,9 +29,8 @@ import com.oneday.app.R
 import com.oneday.app.data.*
 
 fun toggleTask(t: Task) = Repo.update { d ->
-    d.copy(tasks = d.tasks.map {
-        if (it.id == t.id) it.copy(done = !it.done, doneAt = if (!it.done) System.currentTimeMillis() else null) else it
-    })
+    val cur = d.tasks.firstOrNull { it.id == t.id } ?: return@update d
+    if (cur.done) d.reopenTask(t.id) else d.completeTask(t.id)
 }
 
 fun saveTask(t: Task) = Repo.update { d ->
@@ -111,7 +110,9 @@ fun TasksScreen(data: AppData) {
 /** Marca hecho con "Deshacer". */
 fun completeWithUndo(t: Task) {
     toggleTask(t)
-    UiState.showUndo(if (t.done) "Pendiente reabierto" else "Hecho: ${t.title}") { saveTask(t) }
+    UiState.showUndo(if (t.done) "Pendiente reabierto" else if (t.repeat != null) "Hecho · se repite ${fmtDay(nextDate(t.repeat, t.date ?: today())).lowercase()}" else "Hecho: ${t.title}") {
+        Repo.data.tasks.firstOrNull { it.id == t.id }?.let { toggleTask(it) }
+    }
 }
 
 /** Pasa a mañana con "Deshacer". */
@@ -174,6 +175,7 @@ fun TaskRow(task: Task, showDate: Boolean = true, onToggle: () -> Unit, onClick:
                 color = if (task.done) Faint else Ink, fontWeight = FontWeight.Medium,
             )
             val parts = buildList {
+                task.repeat?.let { add(repeatLabel(it)) }
                 task.area?.let { add(it) }
                 if (showDate && task.date != null) add(fmtDay(task.date))
                 if (task.time != null) add(fmtTime(task.time))
@@ -195,6 +197,7 @@ fun TaskDialog(initial: Task, isNew: Boolean, onDismiss: () -> Unit) {
     var priority by remember { mutableIntStateOf(initial.priority) }
     var remind by remember { mutableStateOf(initial.remind) }
     var area by remember { mutableStateOf(initial.area) }
+    var repeat by remember { mutableStateOf(initial.repeat) }
     var newArea by remember { mutableStateOf<String?>(null) }
     val areas = Repo.data.settings.areas
     var pickDate by remember { mutableStateOf(false) }
@@ -235,6 +238,7 @@ fun TaskDialog(initial: Task, isNew: Boolean, onDismiss: () -> Unit) {
                         }) { Text("Agregar") }
                     }
                 }
+                RepeatPicker(repeat, date ?: today()) { repeat = it; if (it != null && date == null) date = today() }
                 Text("Prioridad", style = MaterialTheme.typography.labelLarge, color = Muted)
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     (0..2).forEach { p ->
@@ -253,7 +257,7 @@ fun TaskDialog(initial: Task, isNew: Boolean, onDismiss: () -> Unit) {
         },
         confirmButton = {
             TextButton(enabled = title.isNotBlank(), onClick = {
-                saveTask(initial.copy(title = title.trim(), notes = notes.trim(), date = date, time = time, priority = priority, area = area,
+                saveTask(initial.copy(title = title.trim(), notes = notes.trim(), date = date, time = time, priority = priority, area = area, repeat = repeat,
                     remind = remind && date != null && time != null))
                 onDismiss()
             }) { Text("Guardar") }
@@ -269,4 +273,32 @@ fun TaskDialog(initial: Task, isNew: Boolean, onDismiss: () -> Unit) {
     if (confirmDelete) ConfirmDialog("Eliminar", "¿Eliminar \"${initial.title}\"?", onDismiss = { confirmDelete = false }) {
         deleteTask(initial); onDismiss()
     }
+}
+
+
+/** Elegir si un pendiente se repite: no, diario, días de la semana, cada mes o cada año. */
+@Composable
+fun RepeatPicker(repeat: Repeat?, date: Long, onChange: (Repeat?) -> Unit) {
+    val dow = java.time.LocalDate.ofEpochDay(date).dayOfWeek.value
+    Text("Repetir", style = MaterialTheme.typography.labelLarge, color = Muted)
+    val opts = listOf("No" to null, "Diario" to "day", "Semanal" to "week", "Mensual" to "month", "Anual" to "year")
+    Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+        opts.forEach { (label, kind) ->
+            ChoicePill(label, repeat?.kind == kind, Modifier.weight(1f)) {
+                onChange(when (kind) { null -> null; "week" -> Repeat("week", days = setOf(dow)); else -> Repeat(kind) })
+            }
+        }
+    }
+    if (repeat?.kind == "week") {
+        Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            listOf("L", "M", "X", "J", "V", "S", "D").forEachIndexed { i, l ->
+                val d = i + 1
+                ChoicePill(l, d in repeat.days, Modifier.weight(1f)) {
+                    val days = if (d in repeat.days) repeat.days - d else repeat.days + d
+                    onChange(repeat.copy(days = days.ifEmpty { setOf(d) }))
+                }
+            }
+        }
+    }
+    if (repeat != null) Text(repeatLabel(repeat) + " · al marcarlo hecho aparece el siguiente", color = Faint, style = MaterialTheme.typography.bodySmall)
 }

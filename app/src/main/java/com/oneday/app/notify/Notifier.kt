@@ -22,7 +22,9 @@ import com.oneday.app.data.cravingAlertTime
 import com.oneday.app.data.bucketLabel
 import com.oneday.app.data.countToday
 import com.oneday.app.data.addAmount
+import com.oneday.app.data.completeTask
 import java.time.LocalDate
+import kotlinx.coroutines.launch
 
 object Notifier {
     private const val CHANNEL = "one_day_reminders"
@@ -30,6 +32,7 @@ object Notifier {
     private const val REQ_GYM = 1002
     private const val REQ_MILESTONE = 1003
     private const val REQ_CRAVING = 1004
+    private const val REQ_STEPS = 1005
     const val MILESTONE_CHECK_TIME = 9 * 60
 
     fun createChannel(ctx: Context) {
@@ -103,6 +106,11 @@ object Notifier {
         scheduleDaily(ctx, "milestone", REQ_MILESTONE, s.milestonesOn && d.streaks.isNotEmpty(), MILESTONE_CHECK_TIME)
         val alert = cravingAlertTime(d.cravings)
         scheduleDaily(ctx, "craving", REQ_CRAVING, s.cravingAlertOn && alert != null, alert ?: 0)
+        // Pasos: se sincronizan cada ~30 min aunque la app esté cerrada
+        val stepsPi = pending(ctx, REQ_STEPS, intent(ctx, "steps_sync"))
+        val am = ctx.getSystemService(AlarmManager::class.java)
+        if (d.habits.any { it.source == "steps" }) am.setInexactRepeating(AlarmManager.RTC, System.currentTimeMillis() + 15 * 60_000L, AlarmManager.INTERVAL_HALF_HOUR, stepsPi)
+        else am.cancel(stepsPi)
         for (h in d.habits) {
             val i = intent(ctx, "habit", h.id)
             val req = ("h" + h.id).hashCode()
@@ -146,10 +154,11 @@ object Notifier {
                 val h = d.habits.firstOrNull { it.id == id } ?: return
                 if (t !in h.doneDays) {
                     val streak = habitStreak(h)
-                    val progress = h.target?.let { " Vas ${h.countToday()}/$it ${h.unit}." } ?: ""
+                    val progress = if (h.source == "steps") " Llevas ${"%,d".format(java.util.Locale.US, h.countToday())} de ${"%,d".format(java.util.Locale.US, h.target ?: 10000)} pasos; te faltan ${"%,d".format(java.util.Locale.US, ((h.target ?: 10000) - h.countToday()).coerceAtLeast(0))}."
+                        else h.target?.let { " Vas ${h.countToday()}/$it ${h.unit}." } ?: ""
                     show(ctx, ("h" + h.id).hashCode(), h.name,
                         (if (streak > 0) "Llevas $streak día(s) seguidos. Márcalo hoy para no romper la racha." else "Hoy es buen día para empezar.") + progress,
-                        listOf(Action("Hecho hoy", "act_habit", h.id)))
+                        if (h.source == "steps") emptyList() else listOf(Action("Hecho hoy", "act_habit", h.id)))
                 }
             }
             "craving" -> {
@@ -159,7 +168,7 @@ object Notifier {
             }
             // Botones de las notificaciones
             "act_done" -> {
-                Repo.update { dd -> dd.copy(tasks = dd.tasks.map { if (it.id == id) it.copy(done = true, doneAt = System.currentTimeMillis()) else it }) }
+                Repo.update { dd -> dd.completeTask(id ?: "") }
                 NotificationManagerCompat.from(ctx).cancel(id.hashCode())
             }
             "act_snooze" -> {
@@ -189,7 +198,17 @@ object Notifier {
 
 class AlarmReceiver : BroadcastReceiver() {
     override fun onReceive(ctx: Context, i: Intent) {
-        Notifier.handle(ctx, i.getStringExtra("type"), i.getStringExtra("id"))
+        val type = i.getStringExtra("type"); val id = i.getStringExtra("id")
+        Repo.init(ctx)
+        val needsSteps = type == "steps_sync" || (type == "habit" && Repo.data.habits.any { it.id == id && it.source == "steps" })
+        if (!needsSteps) { Notifier.handle(ctx, type, id); return }
+        // Pasos: leer Health Connect / sensor en segundo plano antes de avisar
+        val pr = goAsync()
+        kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO).launch {
+            runCatching { com.oneday.app.steps.Steps.sync(ctx) }
+            if (type != "steps_sync") Notifier.handle(ctx, type, id)
+            pr.finish()
+        }
     }
 }
 

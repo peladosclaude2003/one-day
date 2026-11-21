@@ -270,3 +270,113 @@ fun plannedSets(data: AppData, exerciseId: String): List<WorkSet> {
     val target = suggestTarget(last)
     return last.map { it.copy(weight = if (it.weight == top && target != null) target.weight else it.weight, done = false, rpe = null, kind = SET_NORMAL) }
 }
+
+
+// ---------- Pendientes que se repiten ----------
+
+/** Siguiente fecha de un pendiente que se repite, a partir de `from` (y nunca antes de hoy). */
+fun nextDate(r: Repeat, from: Long, t: Long = today()): Long {
+    fun step(d: Long): Long {
+        val ld = LocalDate.ofEpochDay(d)
+        return when (r.kind) {
+            "week" -> {
+                val days = r.days.ifEmpty { setOf(ld.dayOfWeek.value) }
+                var x = d + 1
+                while (LocalDate.ofEpochDay(x).dayOfWeek.value !in days) x++
+                x
+            }
+            "month" -> ld.plusMonths(r.every.toLong()).toEpochDay()
+            "year" -> ld.plusYears(r.every.toLong()).toEpochDay()
+            else -> d + r.every.coerceAtLeast(1)
+        }
+    }
+    var n = step(from)
+    while (n < t) n = step(n)
+    return n
+}
+
+fun repeatLabel(r: Repeat): String {
+    val names = listOf("lun", "mar", "mié", "jue", "vie", "sáb", "dom")
+    return when (r.kind) {
+        "week" -> when {
+            r.days.size == 7 -> "Todos los días"
+            r.days == setOf(1, 2, 3, 4, 5) -> "Entre semana"
+            r.days.isEmpty() -> "Cada semana"
+            else -> "Cada " + r.days.sorted().joinToString(", ") { names[it - 1] }
+        }
+        "month" -> if (r.every == 1) "Cada mes" else "Cada ${r.every} meses"
+        "year" -> "Cada año"
+        else -> if (r.every == 1) "Diario" else "Cada ${r.every} días"
+    }
+}
+
+// ---------- Progreso por grupo muscular ----------
+
+/** Grupos del progreso (Bíceps y Tríceps se juntan en "Brazos"). */
+val PROGRESS_GROUPS = listOf("Piernas", "Pecho", "Espalda", "Hombros", "Brazos", "Abdomen")
+
+fun groupOf(muscle: String): String? = when (muscle) {
+    "Pierna" -> "Piernas"; "Pecho" -> "Pecho"; "Espalda" -> "Espalda"; "Hombro" -> "Hombros"
+    "Bíceps", "Tríceps" -> "Brazos"; "Abdomen" -> "Abdomen"; else -> null
+}
+
+/** Volumen (kg) y series de un grupo en una semana que empieza el lunes `monday`. */
+data class GroupWeek(val monday: Long, val volume: Double, val sets: Int)
+
+fun AppData.groupWeeks(group: String, weeks: Int = 12): List<GroupWeek> {
+    val muscle = exercises.associate { it.id to groupOf(it.muscle) }
+    val thisMonday = mondayOf(today())
+    return (weeks - 1 downTo 0).map { w ->
+        val start = thisMonday - w * 7
+        var vol = 0.0; var n = 0
+        workouts.filter { it.date in start until start + 7 }.forEach { wk ->
+            wk.entries.filter { muscle[it.exerciseId] == group }.forEach { e ->
+                e.sets.filter { it.counts }.forEach { s -> vol += s.weight * s.reps; n++ }
+            }
+        }
+        GroupWeek(start, vol, n)
+    }
+}
+
+/**
+ * Índice de fuerza de un grupo: para cada ejercicio del grupo, su mejor 1RM estimado del periodo
+ * comparado con su primer registro; se promedia. 100 = como empezaste.
+ */
+fun AppData.strengthIndex(group: String, upTo: Long = today()): Double? {
+    val muscle = exercises.associate { it.id to groupOf(it.muscle) }
+    val ws = workouts.filter { it.date <= upTo }.sortedBy { it.startedAt }
+    val first = HashMap<String, Double>(); val best = HashMap<String, Double>()
+    ws.forEach { w ->
+        w.entries.filter { muscle[it.exerciseId] == group }.forEach { e ->
+            val top = e.sets.filter { it.counts && it.weight > 0 }.maxOfOrNull { oneRm(it) } ?: return@forEach
+            first.putIfAbsent(e.exerciseId, top)
+            best[e.exerciseId] = maxOf(best[e.exerciseId] ?: 0.0, top)
+        }
+    }
+    if (first.isEmpty()) return null
+    return first.keys.map { best.getValue(it) / first.getValue(it) * 100 }.average()
+}
+
+/** Cambio porcentual del volumen: últimas 4 semanas contra las 4 anteriores. */
+fun AppData.groupTrend(group: String): Int? {
+    val w = groupWeeks(group, 8)
+    val prev = w.take(4).sumOf { it.volume }; val last = w.takeLast(4).sumOf { it.volume }
+    if (prev <= 0) return null
+    return ((last - prev) / prev * 100).toInt()
+}
+
+
+/** Marca un pendiente como hecho; si se repite, crea la siguiente repetición. */
+fun AppData.completeTask(id: String): AppData {
+    val t = tasks.firstOrNull { it.id == id } ?: return this
+    if (t.done) return this
+    val now = System.currentTimeMillis()
+    val next = t.repeat?.let { r -> t.copy(id = newId(), date = nextDate(r, t.date ?: today()), done = false, doneAt = null, nextId = null) }
+    return copy(tasks = tasks.map { if (it.id == id) it.copy(done = true, doneAt = now, nextId = next?.id) else it } + listOfNotNull(next))
+}
+
+/** Reabre un pendiente; quita la repetición que había creado si aún no la tocas. */
+fun AppData.reopenTask(id: String): AppData {
+    val t = tasks.firstOrNull { it.id == id } ?: return this
+    return copy(tasks = tasks.filterNot { it.id == t.nextId && !it.done }.map { if (it.id == id) it.copy(done = false, doneAt = null, nextId = null) else it })
+}

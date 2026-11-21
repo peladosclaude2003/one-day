@@ -47,6 +47,11 @@ class MainActivity : ComponentActivity() {
                 // Medallas nuevas de rachas y hábitos (al abrir y cada minuto)
                 val nowTick = rememberNow()
                 LaunchedEffect(nowTick, data.habits) { checkNewMedals() }
+                // Pasos: al abrir, cada ~3 min con la app abierta y cuando se pide
+                val hasSteps = data.habits.any { it.source == "steps" }
+                LaunchedEffect(nowTick / 180_000, UiState.syncSteps, hasSteps) {
+                    if (hasSteps) runCatching { com.oneday.app.steps.Steps.sync(this@MainActivity) }
+                }
                 val view = LocalView.current
                 DisposableEffect(view) { Fx.view = view; onDispose { Fx.view = null } }
 

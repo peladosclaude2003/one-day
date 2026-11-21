@@ -11,6 +11,7 @@ data class Parsed(
     val priority: Int? = null,
     val daily: Boolean = false,
     val area: String? = null,
+    val repeat: Repeat? = null,
 )
 
 /**
@@ -51,8 +52,19 @@ object QuickParse {
             if (found != null && area == null) { area = found; true } else false
         }
 
-        var daily = false
-        grab(Regex("$b(cada dia|todos los dias|diariamente|diario)$e")) { daily = true; true }
+        // Repetición: diario, cada lunes y jueves, entre semana, cada semana, cada mes, cada año
+        var repeat: Repeat? = null
+        grab(Regex("$b(cada dia|todos los dias|diariamente|diario)$e")) { repeat = Repeat("day"); true }
+        grab(Regex("$b(entre semana|de lunes a viernes)$e")) { if (repeat != null) false else { repeat = Repeat("week", days = setOf(1, 2, 3, 4, 5)); true } }
+        grab(Regex("$b(cada|todos los) ((?:${WEEKDAYS.joinToString("|")})s?(?:(?:, | y | )(?:${WEEKDAYS.joinToString("|")})s?)*)$e")) { m ->
+            if (repeat != null) return@grab false
+            val ds = WEEKDAYS.indices.filter { Regex("${WEEKDAYS[it]}").containsMatchIn(m.groupValues[2]) }.map { it + 1 }.toSet()
+            repeat = Repeat("week", days = ds); true
+        }
+        grab(Regex("$b(cada semana|semanal|semanalmente)$e")) { if (repeat != null) false else { repeat = Repeat("week", days = setOf(now.dayOfWeek.value)); true } }
+        grab(Regex("$b(cada mes|mensual|mensualmente)$e")) { if (repeat != null) false else { repeat = Repeat("month"); true } }
+        grab(Regex("$b(cada ano|anual|anualmente)$e")) { if (repeat != null) false else { repeat = Repeat("year"); true } }
+        val daily = false
 
         var time: Int? = null
         grab(Regex("$b(mediodia|medianoche)$e")) { m -> time = if (m.value == "mediodia") 12 * 60 else 0; true }
@@ -105,6 +117,11 @@ object QuickParse {
             true
         }
 
+        // Repetición semanal sin fecha: empieza el próximo día que toca (o hoy).
+        if (repeat != null && date == null) {
+            val r = repeat!!
+            date = if (r.kind == "week" && r.days.isNotEmpty() && now.dayOfWeek.value !in r.days) nextDate(r, t, t) else t
+        }
         // Una hora sin fecha: hoy si aún no pasa, si no mañana.
         if (time != null && date == null && !daily) {
             date = if (time!! > nowTime.hour * 60 + nowTime.minute) t else t + 1
@@ -119,6 +136,6 @@ object QuickParse {
         while (words.isNotEmpty() && norm(words.last()) in filler) words = words.dropLast(1)
         while (words.size > 1 && norm(words.first()) in setOf("el", "la")) words = words.drop(1)
         title = words.joinToString(" ").replaceFirstChar { it.uppercase() }
-        return Parsed(title, date, time, priority, daily, area)
+        return Parsed(title, date, time, priority, daily, area, repeat)
     }
 }

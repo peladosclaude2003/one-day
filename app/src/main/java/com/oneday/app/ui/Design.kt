@@ -152,6 +152,8 @@ object UiState {
     var hideNav by mutableStateOf(false)
     var sosStreak by mutableStateOf<String?>(null)
     var medal by mutableStateOf<MedalMsg?>(null)
+    /** Súbelo para pedir una sincronización de pasos. */
+    var syncSteps by mutableIntStateOf(0)
     /** Aviso con "Deshacer" que se muestra 4 segundos. */
     var undo by mutableStateOf<Undo?>(null)
     fun showUndo(text: String, action: () -> Unit) { undo = Undo(text, action, System.nanoTime()) }

@@ -108,6 +108,8 @@ fun TodayScreen(data: AppData, onOpenSettings: () -> Unit, onGoTab: (Int) -> Uni
                 } else PrimaryButton("Planear mi día", glyph = "mas") { creating = true }
             }
 
+            if (!data.settings.stepsAsked && data.habits.none { it.source == "steps" }) StepsConnectCard()
+
             // Hábitos como fichas
             if (data.habits.isNotEmpty()) {
                 val doneH = data.habits.count { t in it.doneDays }
@@ -211,7 +213,8 @@ fun HabitTile(h: Habit, t: Long) {
     Column(
         Modifier.width(96.dp).clip(RoundedCornerShape(22.dp)).background(CardBg).border(1.dp, Hairline, RoundedCornerShape(22.dp))
             .clickable(role = Role.Button, onClickLabel = h.name) {
-                if (h.target != null) { addHabitAmount(h, h.step); if (h.addAmount(h.step).let { t in it.doneDays } && !done) Fx.success() else Fx.tick() }
+                if (h.source == "steps") { Fx.tick(); UiState.syncSteps++ }
+                else if (h.target != null) { addHabitAmount(h, h.step); if (h.addAmount(h.step).let { t in it.doneDays } && !done) Fx.success() else Fx.tick() }
                 else { if (!done) Fx.success() else Fx.tick(); toggleHabitToday(h) }
             }.padding(vertical = 12.dp, horizontal = 6.dp),
         horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -230,7 +233,10 @@ fun HabitTile(h: Habit, t: Long) {
         Text(h.name, color = Ink2, style = MaterialTheme.typography.labelLarge, maxLines = 2, overflow = TextOverflow.Ellipsis,
             textAlign = androidx.compose.ui.text.style.TextAlign.Center, minLines = 2, lineHeight = 16.sp)
         Text(
-            when { h.target != null -> "${h.countToday(t)} / ${h.target}"; done -> "Hecho"; else -> "Pendiente" },
+            when {
+                h.source == "steps" -> "${fmtStepsShort(h.countToday(t))} / ${fmtStepsShort(h.target ?: 10000)}"
+                h.target != null -> "${h.countToday(t)} / ${h.target}"; done -> "Hecho"; else -> "Pendiente"
+            },
             color = if (done) Ink2 else Muted, style = MaterialTheme.typography.labelSmall,
         )
     }

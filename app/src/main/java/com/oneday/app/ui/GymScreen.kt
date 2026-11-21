@@ -20,6 +20,8 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.graphics.graphicsLayer
@@ -578,18 +580,25 @@ private fun InlineSetEditor(kind: Int, st: WorkSet, onChange: ((WorkSet) -> Work
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             when (kind) {
                 1 -> PillStepper(fmtSecs(st.seconds ?: 0), "segundos", Modifier.weight(1f),
-                    { onChange { it.copy(seconds = ((it.seconds ?: 0) - 5).coerceAtLeast(0)) } }, { onChange { it.copy(seconds = (it.seconds ?: 0) + 5) } })
+                    { onChange { it.copy(seconds = ((it.seconds ?: 0) - 5).coerceAtLeast(0)) } }, { onChange { it.copy(seconds = (it.seconds ?: 0) + 5) } },
+                    typed = (st.seconds ?: 0).toDouble(), decimals = false, onType = { v -> onChange { it.copy(seconds = v.toInt()) } })
                 2 -> {
                     PillStepper(fmtWeight(round1(st.km ?: 0.0)), "km", Modifier.weight(1f),
-                        { onChange { it.copy(km = round1(((it.km ?: 0.0) - 0.1).coerceAtLeast(0.0))) } }, { onChange { it.copy(km = round1((it.km ?: 0.0) + 0.1)) } })
+                        { onChange { it.copy(km = round1(((it.km ?: 0.0) - 0.1).coerceAtLeast(0.0))) } }, { onChange { it.copy(km = round1((it.km ?: 0.0) + 0.1)) } },
+                        typed = st.km ?: 0.0, onType = { v -> onChange { it.copy(km = v) } })
                     PillStepper("${(st.seconds ?: 0) / 60}", "min", Modifier.weight(1f),
-                        { onChange { it.copy(seconds = ((it.seconds ?: 0) - 60).coerceAtLeast(0)) } }, { onChange { it.copy(seconds = (it.seconds ?: 0) + 60) } })
+                        { onChange { it.copy(seconds = ((it.seconds ?: 0) - 60).coerceAtLeast(0)) } }, { onChange { it.copy(seconds = (it.seconds ?: 0) + 60) } },
+                        typed = ((st.seconds ?: 0) / 60).toDouble(), decimals = false, onType = { v -> onChange { it.copy(seconds = v.toInt() * 60) } })
                 }
                 else -> {
+                    val inc = Repo.data.settings.weightStep
                     PillStepper(fmtWeight(st.weight), "kg", Modifier.weight(1f),
-                        { onChange { it.copy(weight = round1((it.weight - 2.5).coerceAtLeast(0.0) * 100) / 100) } }, { onChange { it.copy(weight = it.weight + 2.5) } })
+                        { onChange { it.copy(weight = Math.round((it.weight - inc).coerceAtLeast(0.0) * 100) / 100.0) } },
+                        { onChange { it.copy(weight = Math.round((it.weight + inc) * 100) / 100.0) } },
+                        typed = st.weight, onType = { v -> onChange { it.copy(weight = v) } })
                     PillStepper("${st.reps}", "reps", Modifier.weight(1f),
-                        { onChange { it.copy(reps = (it.reps - 1).coerceAtLeast(0)) } }, { onChange { it.copy(reps = it.reps + 1) } })
+                        { onChange { it.copy(reps = (it.reps - 1).coerceAtLeast(0)) } }, { onChange { it.copy(reps = it.reps + 1) } },
+                        typed = st.reps.toDouble(), decimals = false, onType = { v -> onChange { it.copy(reps = v.toInt()) } })
                 }
             }
         }
@@ -619,13 +628,15 @@ private fun InlineSetEditor(kind: Int, st: WorkSet, onChange: ((WorkSet) -> Work
 }
 
 @Composable
-private fun PillStepper(value: String, unit: String, modifier: Modifier, onMinus: () -> Unit, onPlus: () -> Unit) {
+private fun PillStepper(value: String, unit: String, modifier: Modifier, onMinus: () -> Unit, onPlus: () -> Unit,
+                        typed: Double? = null, decimals: Boolean = true, onType: ((Double) -> Unit)? = null) {
     Row(modifier.clip(RoundedCornerShape(50)).background(CardBg).padding(4.dp), verticalAlignment = Alignment.CenterVertically) {
         Box(Modifier.size(40.dp).clip(CircleShape).background(Color(0xFF26262A)).clickable(onClickLabel = "Menos $unit") { Fx.tick(); onMinus() }, contentAlignment = Alignment.Center) {
             Text("−", color = Ink, fontSize = 20.sp)
         }
         Column(Modifier.weight(1f), horizontalAlignment = Alignment.CenterHorizontally) {
-            RollingText(value, color = Ink, fontSize = 20.sp, fontWeight = FontWeight.Bold)
+            if (onType != null && typed != null) TypedNumber(typed, decimals, onType)
+            else RollingText(value, color = Ink, fontSize = 20.sp, fontWeight = FontWeight.Bold)
             Text(unit, color = Muted, style = MaterialTheme.typography.labelSmall)
         }
         Box(Modifier.size(40.dp).clip(CircleShape).background(Color(0xFF26262A)).clickable(onClickLabel = "Más $unit") { Fx.tick(); onPlus() }, contentAlignment = Alignment.Center) {
@@ -666,7 +677,7 @@ fun Stepper(label: String, value: String, onChange: (String) -> Unit, step: Doub
     fun bump(dir: Int) {
         val v = (value.replace(',', '.').toDoubleOrNull() ?: 0.0) + dir * step
         val c = v.coerceAtLeast(0.0)
-        onChange(if (decimal) fmtWeight(round1(c)) else c.toInt().toString())
+        onChange(if (decimal) fmtWeight(Math.round(c * 100) / 100.0) else c.toInt().toString())
     }
     Row(verticalAlignment = Alignment.CenterVertically) {
         CircleButton("Menos", onClick = { bump(-1) }) { Text("−", fontSize = 22.sp, color = Ink) }
@@ -846,6 +857,16 @@ fun MonthGrid(month: YearMonth, marked: Set<Long>) {
 
 @Composable
 private fun ProgressTab(data: AppData) {
+    var mode by rememberSaveable { mutableIntStateOf(0) }
+    Column {
+        Segmented(listOf("Por grupo muscular", "Por ejercicio"), mode, { mode = it }, Modifier.padding(horizontal = 16.dp))
+        Spacer(Modifier.height(12.dp))
+        if (mode == 0) GroupProgress(data) else ExerciseProgress(data)
+    }
+}
+
+@Composable
+private fun ExerciseProgress(data: AppData) {
     val withData = data.workouts.flatMap { w -> w.entries.filter { it.sets.isNotEmpty() }.map { it.exerciseId } }
         .groupingBy { it }.eachCount().entries.sortedByDescending { it.value }.map { it.key }
     if (withData.isEmpty()) {
@@ -982,4 +1003,26 @@ private fun RoutineDialog(data: AppData, initial: Routine?, onDismiss: () -> Uni
         Repo.update { d -> d.copy(routines = d.routines.filterNot { it.id == initial.id }) }
         onDismiss()
     }
+}
+
+
+/** Número que se toca y se escribe directo (ej. 7, 8 o 5.9 kg). */
+@Composable
+private fun TypedNumber(value: Double, decimals: Boolean, onValue: (Double) -> Unit) {
+    fun show(v: Double) = if (decimals) fmtWeight(v) else v.toInt().toString()
+    var text by remember { mutableStateOf(show(value)) }
+    LaunchedEffect(value) { if (text.replace(',', '.').toDoubleOrNull() != value) text = show(value) }
+    androidx.compose.foundation.text.BasicTextField(
+        value = text,
+        onValueChange = { s ->
+            val f = s.filter { it.isDigit() || (decimals && (it == '.' || it == ',')) }.take(6)
+            text = f
+            f.replace(',', '.').toDoubleOrNull()?.let(onValue)
+        },
+        singleLine = true,
+        textStyle = androidx.compose.ui.text.TextStyle(fontFamily = Display, fontWeight = FontWeight.Bold, fontSize = 20.sp, color = Ink, textAlign = TextAlign.Center),
+        keyboardOptions = KeyboardOptions(keyboardType = if (decimals) KeyboardType.Decimal else KeyboardType.Number),
+        cursorBrush = androidx.compose.ui.graphics.SolidColor(Accent),
+        modifier = Modifier.fillMaxWidth().semantics { contentDescription = "Escribir valor" },
+    )
 }

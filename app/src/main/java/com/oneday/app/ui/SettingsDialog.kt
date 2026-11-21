@@ -84,7 +84,15 @@ fun SettingsDialog(data: AppData, onDismiss: () -> Unit) {
                 }
 
                 HorizontalDivider()
-                Text("BARRA Y DISCOS", color = Faint, letterSpacing = 1.2.sp, style = MaterialTheme.typography.labelLarge)
+                StepsSettings()
+
+                HorizontalDivider()
+                Text("GIMNASIO", color = Faint, letterSpacing = 1.2.sp, style = MaterialTheme.typography.labelLarge)
+                Text("Botones − / + del peso", color = Ink)
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    listOf(0.5, 1.0, 2.0, 2.5, 5.0).forEach { st -> ChoicePill("${fmtWeight(st)} kg", s.weightStep == st, Modifier.weight(1f)) { set { it.copy(weightStep = st) } } }
+                }
+                Text("Siempre puedes tocar el número y escribir el peso exacto, por ejemplo 5.9.", color = Muted, style = MaterialTheme.typography.bodySmall)
                 Text("Peso de la barra", color = Ink)
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     listOf(20.0, 15.0, 10.0, 7.0).forEach { b -> ChoicePill("${fmtWeight(b)} kg", s.barKg == b, Modifier.weight(1f)) { set { it.copy(barKg = b) } } }

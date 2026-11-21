@@ -177,7 +177,8 @@ fun HabitCard(h: Habit, onEdit: () -> Unit) {
             Spacer(Modifier.height(16.dp))
             MedalShelf(maxOf(habitBest(h), streak).toLong())
             Spacer(Modifier.height(16.dp))
-            if (h.target != null) {
+            if (h.source == "steps") StepsDetail(h)
+            else if (h.target != null) {
                 val n = h.countToday()
                 Row(verticalAlignment = Alignment.Bottom) {
                     Text("Hoy", color = Muted, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.padding(bottom = 3.dp))

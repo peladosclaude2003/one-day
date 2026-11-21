@@ -15,7 +15,12 @@ class QuickParseTest {
         assertEquals("Dentista", title); assertEquals(t + 1, date); assertEquals(600, time); assertEquals(2, priority)
     }
     @Test fun viernes() = with(p("pagar luz viernes")) { assertEquals("Pagar luz", title); assertEquals(t + 1, date); assertEquals(null, time) }
-    @Test fun diario() = with(p("leer cada día 9pm")) { assertEquals("Leer", title); assertEquals(true, daily); assertEquals(21 * 60, time) }
+    @Test fun diario() = with(p("leer cada día 9pm")) { assertEquals("Leer", title); assertEquals(Repeat("day"), repeat); assertEquals(21 * 60, time); assertEquals(t, date) }
+    @Test fun cadaLunesYJueves() = with(p("gym cada lunes y jueves 7pm")) {
+        assertEquals("Gym", title); assertEquals(Repeat("week", days = setOf(1, 4)), repeat); assertEquals(t, date) // hoy es jueves
+    }
+    @Test fun entreSemana() = with(p("revisar correo entre semana")) { assertEquals(setOf(1, 2, 3, 4, 5), repeat?.days); assertEquals("Revisar correo", title) }
+    @Test fun cadaMes() = with(p("pagar renta cada mes")) { assertEquals("month", repeat?.kind); assertEquals("Pagar renta", title) }
     @Test fun enDias() = with(p("gym en 3 días a las 7")) { assertEquals("Gym", title); assertEquals(t + 3, date); assertEquals(19 * 60, time) }
     @Test fun fechaLarga() = with(p("cita 15 de diciembre 4:30pm")) {
         assertEquals("Cita", title); assertEquals(LocalDate.of(2026, 12, 15).toEpochDay(), date); assertEquals(16 * 60 + 30, time)

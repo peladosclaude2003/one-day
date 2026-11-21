@@ -61,7 +61,7 @@ fun SetDialog(ex: Exercise?, base: WorkSet?, canDelete: Boolean, onDismiss: () -
                         Stepper("Distancia (km)", km, { km = it }, step = 0.1, decimal = true)
                     }
                     else -> {
-                        Stepper("Peso (kg)", weight, { weight = it }, step = 2.5, decimal = true)
+                        Stepper("Peso (kg)", weight, { weight = it }, step = Repo.data.settings.weightStep, decimal = true)
                         Stepper("Repeticiones", reps, { reps = it }, step = 1.0, decimal = false)
                         val total = weight.replace(',', '.').toDoubleOrNull()
                         if (total != null && total > Repo.data.settings.barKg) {

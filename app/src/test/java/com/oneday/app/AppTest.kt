@@ -86,11 +86,14 @@ class AppTest {
                 workouts = workouts,
                 bodyWeights = (0 until 20).map { BodyWeight(t - 38 + it * 2, 74.0 - it * 0.15 + (if (it % 3 == 0) 0.6 else 0.0)) },
                 relapses = listOf(Relapse(fumarId, now - 30 * DAY_MS, "Estrés", days = 20), Relapse(fumarId, now - 50 * DAY_MS, "Social o fiesta", days = 6), Relapse(fumarId, now - 60 * DAY_MS, "Estrés", days = 3)),
-                settings = Settings(weightGoal = 70.0, gymGoal = 5, onboarded = true, userName = "Alex"),
+                settings = Settings(weightGoal = 70.0, gymGoal = 5, onboarded = true, userName = "Alex", stepsAsked = true),
                 habits = listOf(
                     Habit(name = "Tomar 2 L de agua", emoji = "💧", createdDay = t - 20, doneDays = ((t - 20)..(t - 1)).toSet() - (t - 9), remindAt = 10 * 60),
                     Habit(name = "Leer 20 minutos", emoji = "📖", createdDay = t - 6, doneDays = setOf(t - 6, t - 5, t - 3, t - 2, t - 1, t)),
                     Habit(name = "Vasos de agua", emoji = "💧", createdDay = t - 3, target = 8, unit = "vasos", doneDays = setOf(t - 3, t - 2, t - 1), counts = mapOf(t to 5)),
+                    Habit(name = "Caminar", emoji = "pasos", createdDay = t - 9, target = 10000, unit = "pasos", step = 0, source = "steps",
+                        counts = (0..9).associate { (t - it) to listOf(6240, 11030, 9800, 12400, 10200, 8700, 10900, 12000, 7300, 10500)[it] },
+                        doneDays = (0..9).filter { listOf(6240, 11030, 9800, 12400, 10200, 8700, 10900, 12000, 7300, 10500)[it] >= 10000 }.map { t - it }.toSet()),
                 ),
                 cravings = List(9) { i -> Craving(fumarId, now - i * DAY_MS / 2 - (i % 3) * 3600_000L, 2 + i % 4) },
             )
@@ -118,7 +121,7 @@ class AppTest {
         tap("Construir"); shot("03b_habitos")
         rule.onRoot().performTouchInput { swipeUp(startY = bottom * 0.9f, endY = bottom * 0.2f) }
         rule.mainClock.advanceTimeBy(1500); shot("03b2_habito_cantidad")
-        tap("Sumar 1")
+        rule.onNodeWithText("Sumar 1").performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.OnClick); rule.mainClock.advanceTimeBy(800)
         check(Repo.data.habits.first { it.target != null }.countToday() == 6) { "No sumó al hábito" }
         rule.onRoot().performTouchInput { swipeDown(startY = bottom * 0.2f, endY = bottom * 0.9f) }
         rule.mainClock.advanceTimeBy(1500)
@@ -137,6 +140,10 @@ class AppTest {
         rule.mainClock.advanceTimeBy(1500); shot("05b_gym_musculos")
         tap("Historial"); shot("06_historial")
         tap("Progreso"); shot("07_progreso")
+        rule.onRoot().performTouchInput { swipeUp(startY = bottom * 0.85f, endY = top + 50f) }
+        rule.mainClock.advanceTimeBy(1500); shot("07b_progreso_abajo")
+        tap("Por ejercicio"); shot("07c_progreso_ejercicio")
+        tap("Por grupo muscular")
         tap("Rutinas"); shot("08_rutinas")
         tap("Resumen")
         tap("Empezar entrenamiento"); shot("09_entrenando")

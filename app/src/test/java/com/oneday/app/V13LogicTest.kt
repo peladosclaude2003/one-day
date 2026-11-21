@@ -60,6 +60,40 @@ class V13LogicTest {
         assertEquals("2.5 km · 20:00", fmtSet(WorkSet(0.0, 0, seconds = 1200, km = 2.5)))
     }
 
+    @Test fun fechasDeRepeticion() {
+        val jue = LocalDate.of(2026, 11, 12).toEpochDay()
+        assertEquals(jue + 1, nextDate(Repeat("day"), jue, jue))
+        assertEquals(jue + 4, nextDate(Repeat("week", days = setOf(1)), jue, jue)) // siguiente lunes
+        assertEquals(LocalDate.of(2026, 12, 12).toEpochDay(), nextDate(Repeat("month"), jue, jue))
+        // Si estaba atrasado, salta hasta hoy o después
+        assertEquals(jue, nextDate(Repeat("day"), jue - 5, jue))
+    }
+
+    @Test fun completarRepetidoCreaElSiguienteYReabrirLoQuita() {
+        val t0 = today()
+        val d0 = AppData(tasks = listOf(Task(id = "a", title = "Basura", date = t0, repeat = Repeat("week", days = setOf(java.time.LocalDate.ofEpochDay(t0).dayOfWeek.value)))))
+        val d1 = d0.completeTask("a")
+        assertEquals(2, d1.tasks.size)
+        val next = d1.tasks.first { it.id != "a" }
+        assertEquals(t0 + 7, next.date); assertFalse(next.done)
+        val d2 = d1.reopenTask("a")
+        assertEquals(1, d2.tasks.size); assertFalse(d2.tasks.first().done)
+    }
+
+    @Test fun progresoPorGrupo() {
+        val t0 = today()
+        val ws = (0 until 6).map { i ->
+            Workout(date = t0 - 50 + i * 10, name = "Pierna", startedAt = i.toLong(),
+                entries = listOf(WorkEntry("ex_sentadilla", listOf(WorkSet(60.0 + i * 5, 8))), WorkEntry("ex_curl_barra", listOf(WorkSet(20.0, 10)))))
+        }
+        val d = AppData(workouts = ws)
+        assertEquals(oneRm(WorkSet(85.0, 8)) / oneRm(WorkSet(60.0, 8)) * 100, d.strengthIndex("Piernas")!!, 1e-6)
+        assertEquals(100.0, d.strengthIndex("Brazos")!!, 1e-6)
+        assertEquals(null, d.strengthIndex("Pecho"))
+        assertEquals("Brazos", groupOf("Tríceps"))
+        assertTrue(d.groupWeeks("Piernas", 12).sumOf { it.sets } >= 5)
+    }
+
     @Test fun formatoDePeso() {
         assertEquals("56.25", fmtWeight(56.25)); assertEquals("82.5", fmtWeight(82.5)); assertEquals("60", fmtWeight(60.0)); assertEquals("1.25", fmtWeight(1.25))
     }
