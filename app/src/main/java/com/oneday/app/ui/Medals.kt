@@ -84,7 +84,7 @@ fun MedalShelf(best: Long) {
     }
 }
 
-data class MedalMsg(val number: String, val unit: String, val tier: Tier, val title: String, val sub: String, val id: Long = System.nanoTime())
+data class MedalMsg(val number: String, val unit: String, val tier: Tier, val title: String, val sub: String, val id: Long = System.nanoTime(), val share: ShareSpec? = null)
 
 /** Aviso de vidrio que baja desde arriba con la medalla nueva (3 s). */
 @Composable
@@ -110,11 +110,14 @@ fun MedalToast(modifier: Modifier = Modifier) {
         ) {
             Medal(m.number, m.unit, m.tier, 60.dp, Modifier.graphicsLayer { rotationZ = rot.value })
             Spacer(Modifier.width(14.dp))
-            Column {
+            Column(Modifier.weight(1f)) {
                 Text("NUEVA MEDALLA", color = AccentText, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Bold, letterSpacing = 1.6.sp)
                 Text(m.title, color = Ink, fontFamily = Display, fontWeight = FontWeight.Bold, fontSize = 20.sp)
                 Text(m.sub, color = Muted, style = MaterialTheme.typography.bodySmall)
             }
+            Box(Modifier.size(44.dp).clip(androidx.compose.foundation.shape.CircleShape).background(CardHigh)
+                .clickableNoRipple { UiState.share = m.share ?: ShareSpec(m.number, m.unit, m.tier, m.title, null, listOf("FECHA" to shareDate())); UiState.medal = null },
+                contentAlignment = Alignment.Center) { Glyph("compartir", Ink, 20.dp, "Compartir") }
         }
     }
 }
@@ -128,11 +131,11 @@ fun checkNewMedals() {
     d.streaks.forEach { s ->
         val days = maxOf(streakDays(s), 0)
         val got = MEDAL_DAYS.filter { days >= it }
-        got.forEach { g -> val k = "s:${s.id}:$g"; if (k !in seen) { newSeen += k; show = MedalMsg("$g", "DÍAS", tierFor(g), "$g días sin ${s.name.lowercase()}", medalLine(g)) } }
+        got.forEach { g -> val k = "s:${s.id}:$g"; if (k !in seen) { newSeen += k; show = MedalMsg("$g", "DÍAS", tierFor(g), "$g días sin ${s.name.lowercase()}", medalLine(g), share = streakShare(s)) } }
     }
     d.habits.forEach { h ->
         val st = habitStreak(h).toLong()
-        MEDAL_DAYS.filter { st >= it }.forEach { g -> val k = "h:${h.id}:$g"; if (k !in seen) { newSeen += k; show = MedalMsg("$g", "DÍAS", tierFor(g), "$g días: ${h.name.lowercase()}", medalLine(g)) } }
+        MEDAL_DAYS.filter { st >= it }.forEach { g -> val k = "h:${h.id}:$g"; if (k !in seen) { newSeen += k; show = MedalMsg("$g", "DÍAS", tierFor(g), "$g días: ${h.name.lowercase()}", medalLine(g), share = habitShare(h)) } }
     }
     if (newSeen.isNotEmpty()) {
         Repo.update { it.copy(settings = it.settings.copy(seenMedals = it.settings.seenMedals + newSeen)) }

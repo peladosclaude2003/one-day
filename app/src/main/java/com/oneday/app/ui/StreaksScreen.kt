@@ -2,11 +2,15 @@ package com.oneday.app.ui
 
 import androidx.compose.foundation.clickable
 import com.oneday.app.R
+import sh.calvin.reorderable.ReorderableItem
+import sh.calvin.reorderable.rememberReorderableLazyListState
+import androidx.compose.ui.draw.shadow
 import androidx.compose.foundation.border
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.foundation.background
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Color
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -59,22 +63,45 @@ fun StreaksScreen(data: AppData) {
         }
         Segmented(listOf("Dejar", "Construir"), mode, { mode = it }, Modifier.padding(horizontal = 16.dp))
         Spacer(Modifier.height(8.dp))
+        if (data.streaks.size + data.habits.size > 1) TipBubble("tip_reorder", "Mantén presionada una tarjeta para cambiar su orden.", Modifier.padding(horizontal = 16.dp, vertical = 4.dp))
         if (mode == 0) {
             if (data.streaks.isEmpty()) EmptyState("racha", "Empieza tu primera racha", "Agrega algo que quieras dejar (fumar, alcohol, azúcar, redes…) y cuenta cada día que lo logras.")
             val hero = data.streaks.firstOrNull { it.id == heroId } ?: data.streaks.maxByOrNull { streakDays(it, now) }
-            LazyColumn(contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 120.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            val sListState = androidx.compose.foundation.lazy.rememberLazyListState()
+            val sReorder = rememberReorderableLazyListState(sListState) { from, to ->
+                Repo.update { d -> val l = d.streaks.toMutableList(); val f = l.indexOfFirst { it.id == from.key }; val t = l.indexOfFirst { it.id == to.key }
+                    if (f >= 0 && t >= 0) l.add(t, l.removeAt(f)); d.copy(streaks = l) }
+                Fx.tick()
+            }
+            LazyColumn(state = sListState, contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 120.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 hero?.let { s ->
                     item(key = "hero") {
                         StreakCard(s, now, data.cravings.count { it.streakId == s.id }, onEdit = { editing = s }, onReset = { resetting = s },
                             onSos = { UiState.sosStreak = s.id }, onCravings = { cravingsOf = s })
                     }
                 }
-                items(data.streaks.filter { it.id != hero?.id }, key = { it.id }) { s -> StreakRow(s, now) { heroId = s.id } }
+                items(data.streaks.filter { it.id != hero?.id }, key = { it.id }) { s ->
+                    ReorderableItem(sReorder, key = s.id) { dragging ->
+                        val elev by androidx.compose.animation.core.animateDpAsState(if (dragging) 16.dp else 0.dp, label = "e")
+                        Box(Modifier.shadow(elev, RoundedCornerShape(28.dp)).longPressDraggableHandle(onDragStarted = { Fx.tick() })) { StreakRow(s, now) { heroId = s.id } }
+                    }
+                }
             }
         } else {
             if (data.habits.isEmpty()) EmptyState("brote", "Construye un hábito", "Algo pequeño que quieras hacer cada día: tomar agua, leer, meditar. Tienes 1 día de gracia por semana.")
-            LazyColumn(contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 120.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                items(data.habits, key = { it.id }) { h -> HabitCard(h, onEdit = { editingHabit = h }) }
+            val hListState = androidx.compose.foundation.lazy.rememberLazyListState()
+            val hReorder = rememberReorderableLazyListState(hListState) { from, to ->
+                Repo.update { d -> val l = d.habits.toMutableList(); val f = l.indexOfFirst { it.id == from.key }; val t = l.indexOfFirst { it.id == to.key }
+                    if (f >= 0 && t >= 0) l.add(t, l.removeAt(f)); d.copy(habits = l) }
+                Fx.tick()
+            }
+            LazyColumn(state = hListState, contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 4.dp, bottom = 120.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                items(data.habits, key = { it.id }) { h ->
+                    ReorderableItem(hReorder, key = h.id) { dragging ->
+                        val elev by androidx.compose.animation.core.animateDpAsState(if (dragging) 16.dp else 0.dp, label = "e")
+                        Box(Modifier.shadow(elev, RoundedCornerShape(28.dp)).longPressDraggableHandle(onDragStarted = { Fx.tick() })) { HabitCard(h, onEdit = { editingHabit = h }) }
+                    }
+                }
             }
         }
     }
@@ -136,7 +163,8 @@ fun HabitCard(h: Habit, onEdit: () -> Unit) {
     Box {
         OdCard(padding = 22.dp) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                IconChip(h.emoji, if (done) ChipState.Done else ChipState.Pending, 50.dp, h.name)
+                val (flip, _) = rememberGoalCelebration(done)
+                Box(Modifier.graphicsLayer { rotationY = flip; cameraDistance = 12f * density }) { IconChip(h.emoji, if (done) ChipState.Done else ChipState.Pending, 50.dp, h.name) }
                 Spacer(Modifier.width(8.dp))
                 Column(Modifier.weight(1f)) {
                     Text(h.name, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold, color = Ink)
@@ -145,6 +173,7 @@ fun HabitCard(h: Habit, onEdit: () -> Unit) {
                         color = Faint, style = MaterialTheme.typography.bodySmall,
                     )
                 }
+                IconButton(onClick = { Fx.tick(); UiState.share = habitShare(h) }) { Glyph("compartir", Faint, 20.dp, "Compartir") }
                 IconButton(onClick = onEdit) { Icon(Icons.Filled.Edit, "Editar", tint = Faint) }
             }
             Spacer(Modifier.height(14.dp))
@@ -284,6 +313,7 @@ fun StreakCard(s: Streak, now: Long, cravings: Int, onEdit: () -> Unit, onReset:
     OdCard(padding = 20.dp) {
         Box(Modifier.fillMaxWidth()) {
             IconButton(onClick = onEdit, modifier = Modifier.align(Alignment.TopEnd)) { Glyph("editar", Faint, 20.dp, "Editar racha") }
+            IconButton(onClick = { Fx.tick(); UiState.share = streakShare(s) }, modifier = Modifier.align(Alignment.TopStart)) { Glyph("compartir", Faint, 20.dp, "Compartir racha") }
             Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.CenterHorizontally) {
                 Box(Modifier.size(132.dp), contentAlignment = Alignment.Center) {
                     androidx.compose.foundation.Canvas(Modifier.fillMaxSize()) {

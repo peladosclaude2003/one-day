@@ -39,6 +39,9 @@ class AppTest {
         File(dir, "$name.png").outputStream().use { bmp.compress(Bitmap.CompressFormat.PNG, 100, it) }
     }
 
+    private fun hasClickLabel(l: String) = SemanticsMatcher("click label $l") {
+        androidx.compose.ui.semantics.SemanticsActions.OnClick in it.config && it.config[androidx.compose.ui.semantics.SemanticsActions.OnClick].label == l
+    }
     private fun nav(desc: String) { rule.onNodeWithContentDescription(desc, useUnmergedTree = false).performClick(); rule.mainClock.advanceTimeBy(800) }
     private fun tap(text: String) { rule.onNodeWithText(text).performClick(); rule.mainClock.advanceTimeBy(800) }
 
@@ -88,9 +91,9 @@ class AppTest {
                 relapses = listOf(Relapse(fumarId, now - 30 * DAY_MS, "Estrés", days = 20), Relapse(fumarId, now - 50 * DAY_MS, "Social o fiesta", days = 6), Relapse(fumarId, now - 60 * DAY_MS, "Estrés", days = 3)),
                 settings = Settings(weightGoal = 70.0, gymGoal = 5, onboarded = true, userName = "Alex", stepsAsked = true),
                 habits = listOf(
+                    Habit(name = "Vasos de agua", emoji = "💧", createdDay = t - 3, target = 8, unit = "vasos", doneDays = setOf(t - 3, t - 2, t - 1), counts = mapOf(t to 5)),
                     Habit(name = "Tomar 2 L de agua", emoji = "💧", createdDay = t - 20, doneDays = ((t - 20)..(t - 1)).toSet() - (t - 9), remindAt = 10 * 60),
                     Habit(name = "Leer 20 minutos", emoji = "📖", createdDay = t - 6, doneDays = setOf(t - 6, t - 5, t - 3, t - 2, t - 1, t)),
-                    Habit(name = "Vasos de agua", emoji = "💧", createdDay = t - 3, target = 8, unit = "vasos", doneDays = setOf(t - 3, t - 2, t - 1), counts = mapOf(t to 5)),
                     Habit(name = "Caminar", emoji = "pasos", createdDay = t - 9, target = 10000, unit = "pasos", step = 0, source = "steps",
                         counts = (0..9).associate { (t - it) to listOf(6240, 11030, 9800, 12400, 10200, 8700, 10900, 12000, 7300, 10500)[it] },
                         doneDays = (0..9).filter { listOf(6240, 11030, 9800, 12400, 10200, 8700, 10900, 12000, 7300, 10500)[it] >= 10000 }.map { t - it }.toSet()),
@@ -119,14 +122,13 @@ class AppTest {
         UiState.undo = null
         nav("Rachas"); shot("03_rachas")
         tap("Construir"); shot("03b_habitos")
+        rule.onNodeWithText("Sumar 1").performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.OnClick); rule.mainClock.advanceTimeBy(800)
+        rule.onAllNodesWithText("Marcar hecho hoy")[0].performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.OnClick); rule.mainClock.advanceTimeBy(800)
         rule.onRoot().performTouchInput { swipeUp(startY = bottom * 0.9f, endY = bottom * 0.2f) }
         rule.mainClock.advanceTimeBy(1500); shot("03b2_habito_cantidad")
-        rule.onNodeWithText("Sumar 1").performSemanticsAction(androidx.compose.ui.semantics.SemanticsActions.OnClick); rule.mainClock.advanceTimeBy(800)
         check(Repo.data.habits.first { it.target != null }.countToday() == 6) { "No sumó al hábito" }
-        rule.onRoot().performTouchInput { swipeDown(startY = bottom * 0.2f, endY = bottom * 0.9f) }
-        rule.mainClock.advanceTimeBy(1500)
-        tap("Marcar hecho hoy")
-        check(today() in Repo.data.habits.first().doneDays) { "No se marcó el hábito" }
+        repeat(3) { rule.onRoot().performTouchInput { swipeDown(startY = bottom * 0.2f, endY = bottom * 0.9f) }; rule.mainClock.advanceTimeBy(1200) }
+        check(today() in Repo.data.habits.first { it.name == "Tomar 2 L de agua" }.doneDays) { "No se marcó el hábito" }
         tap("Dejar")
         rule.onAllNodesWithText("Tengo ganas")[0].performClick(); rule.mainClock.advanceTimeBy(2500); shot("03c_sos_respira")
         tap("Ya estoy mejor"); shot("03d_sos_califica")
@@ -145,6 +147,8 @@ class AppTest {
         tap("Por ejercicio"); shot("07c_progreso_ejercicio")
         tap("Por grupo muscular")
         tap("Rutinas"); shot("08_rutinas")
+        tap("Pierna"); rule.mainClock.advanceTimeBy(800); shot("08b_editor_rutina")
+        rule.onNode(hasClickLabel("Volver")).performClick(); rule.mainClock.advanceTimeBy(800)
         tap("Resumen")
         tap("Empezar entrenamiento"); shot("09_entrenando")
         Repo.update { d -> d.copy(activeWorkout = d.activeWorkout!!.let { w ->
@@ -155,5 +159,6 @@ class AppTest {
         tap("Terminar entrenamiento")
         check(Repo.data.activeWorkout == null && Repo.data.workouts.size == workouts.size + 1) { "No se guardó el entrenamiento" }
         nav("Hoy"); shot("11_hoy_final")
+        rule.onNode(hasClickLabel("Tú y ajustes")).performClick(); rule.mainClock.advanceTimeBy(1200); shot("12_tu")
     }
 }

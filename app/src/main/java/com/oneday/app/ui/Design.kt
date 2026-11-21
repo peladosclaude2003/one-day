@@ -26,6 +26,7 @@ import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.unit.TextUnit
 import com.oneday.app.data.Repo
+import kotlinx.coroutines.launch
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -152,6 +153,8 @@ object UiState {
     var hideNav by mutableStateOf(false)
     var sosStreak by mutableStateOf<String?>(null)
     var medal by mutableStateOf<MedalMsg?>(null)
+    /** Imagen de logro a compartir (abre la vista previa). */
+    var share by mutableStateOf<ShareSpec?>(null)
     /** Súbelo para pedir una sincronización de pasos. */
     var syncSteps by mutableIntStateOf(0)
     /** Aviso con "Deshacer" que se muestra 4 segundos. */
@@ -469,7 +472,11 @@ fun GlassSheet(onDismiss: () -> Unit, content: @Composable ColumnScope.() -> Uni
         shape = RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp),
         dragHandle = { Box(Modifier.padding(top = 10.dp, bottom = 8.dp).size(40.dp, 5.dp).clip(CircleShape).background(Color.White.copy(alpha = 0.25f))) },
     ) {
-        Column(Modifier.padding(horizontal = 24.dp).padding(bottom = 28.dp), content = content)
+        val anim = Repo.data.settings.animationsOn
+        val grow = remember { Animatable(if (anim) 0.92f else 1f) }
+        LaunchedEffect(Unit) { grow.animateTo(1f, spring(dampingRatio = 0.8f, stiffness = 380f)) }
+        Column(Modifier.graphicsLayer { scaleX = grow.value; scaleY = grow.value; alpha = ((grow.value - 0.92f) / 0.08f).coerceIn(0.3f, 1f); transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0.5f, 1f) }
+            .padding(horizontal = 24.dp).padding(bottom = 28.dp), content = content)
     }
 }
 
@@ -504,7 +511,8 @@ fun ScreenTitle(title: String, subtitle: String? = null, action: (@Composable ()
 @Composable
 fun EmptyState(icon: String, title: String, subtitle: String, modifier: Modifier = Modifier) {
     Column(modifier.fillMaxWidth().padding(vertical = 40.dp, horizontal = 24.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-        Box(Modifier.size(84.dp).clip(RoundedCornerShape(27.dp)).background(CardBg).border(1.dp, Hairline, RoundedCornerShape(27.dp)), contentAlignment = Alignment.Center) {
+        if (Illus.ALL.containsKey(icon)) Illustration(icon)
+        else Box(Modifier.size(84.dp).clip(RoundedCornerShape(27.dp)).background(CardBg).border(1.dp, Hairline, RoundedCornerShape(27.dp)), contentAlignment = Alignment.Center) {
             Glyph(icon, Muted, 38.dp)
         }
         Spacer(Modifier.height(12.dp))
@@ -599,5 +607,70 @@ fun DrawnCheck(color: Color, size: Dp, checked: Boolean) {
         val seg = androidx.compose.ui.graphics.Path()
         measure.getSegment(0f, measure.length * p.value, seg, true)
         drawPath(seg, color, style = androidx.compose.ui.graphics.drawscope.Stroke(2.8f * s, cap = androidx.compose.ui.graphics.StrokeCap.Round, join = androidx.compose.ui.graphics.StrokeJoin.Round))
+    }
+}
+
+
+/** Pantalla de inicio: el anillo del ícono se cierra y aparece el punto "de hoy". */
+@Composable
+fun SplashOverlay(onDone: () -> Unit) {
+    val sweep = remember { Animatable(0f) }
+    val dot = remember { Animatable(0f) }
+    LaunchedEffect(Unit) {
+        sweep.animateTo(300f, tween(420, easing = androidx.compose.animation.core.FastOutSlowInEasing))
+        dot.animateTo(1f, spring(dampingRatio = 0.5f, stiffness = 600f))
+        kotlinx.coroutines.delay(120)
+        onDone()
+    }
+    Box(Modifier.fillMaxSize().background(Bg), contentAlignment = Alignment.Center) {
+        Canvas(Modifier.size(96.dp)) {
+            val sw = size.width * 0.085f
+            val r = size.width * 0.5f - sw
+            val c = center
+            drawArc(Accent, -90f, sweep.value, false, topLeft = Offset(c.x - r, c.y - r), size = androidx.compose.ui.geometry.Size(r * 2, r * 2),
+                style = androidx.compose.ui.graphics.drawscope.Stroke(sw, cap = androidx.compose.ui.graphics.StrokeCap.Round))
+            val a = Math.toRadians(240.0)
+            drawCircle(Accent, sw * 0.55f * dot.value, Offset(c.x + r * Math.cos(a).toFloat(), c.y + r * Math.sin(a).toFloat()))
+        }
+    }
+}
+
+
+/**
+ * Celebración de meta: devuelve (giro, destello). Cuando `done` pasa de falso a verdadero,
+ * la ficha gira 180° y un destello recorre el anillo una vez.
+ */
+@Composable
+fun rememberGoalCelebration(done: Boolean): Pair<Float, Float> {
+    val s = Repo.data.settings
+    val flip = remember { Animatable(0f) }
+    val glint = remember { Animatable(-1f) }
+    var prev by remember { mutableStateOf(done) }
+    LaunchedEffect(done) {
+        if (done && !prev && s.animationsOn && s.celebrationsOn) {
+            Fx.success()
+            kotlinx.coroutines.coroutineScope {
+                launch { flip.snapTo(180f); flip.animateTo(0f, spring(dampingRatio = 0.6f, stiffness = 220f)) }
+                launch { glint.snapTo(0f); glint.animateTo(1f, tween(800)); glint.snapTo(-1f) }
+            }
+        }
+        prev = done
+    }
+    return flip.value to glint.value
+}
+
+/** Burbuja de consejo que aparece una sola vez. */
+@Composable
+fun TipBubble(key: String, text: String, modifier: Modifier = Modifier) {
+    if (key in Repo.data.settings.seenTips) return
+    Row(
+        modifier.fillMaxWidth().clip(RoundedCornerShape(22.dp)).background(Glass).border(1.dp, Accent.copy(alpha = 0.35f), RoundedCornerShape(22.dp))
+            .padding(start = 14.dp, end = 6.dp, top = 10.dp, bottom = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(Modifier.size(32.dp).clip(CircleShape).background(AccentSoft), contentAlignment = Alignment.Center) { Glyph("estudiar", Accent, 17.dp) }
+        Spacer(Modifier.width(10.dp))
+        Text(text, color = Ink, style = MaterialTheme.typography.bodyMedium, modifier = Modifier.weight(1f))
+        TextButton(onClick = { Fx.tick(); Repo.update { it.copy(settings = it.settings.copy(seenTips = it.settings.seenTips + key)) } }) { Text("Entendido", color = Accent) }
     }
 }

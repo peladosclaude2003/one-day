@@ -26,6 +26,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
@@ -34,18 +35,25 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.oneday.app.R
 import com.oneday.app.data.*
+import sh.calvin.reorderable.ReorderableItem
+import sh.calvin.reorderable.rememberReorderableLazyListState
 import java.time.LocalDate
 import java.time.YearMonth
 import java.time.format.DateTimeFormatter
 
 private fun exName(data: AppData, id: String) = data.exercises.firstOrNull { it.id == id }?.name ?: "Ejercicio eliminado"
 
-object GymUi { var minimized by mutableStateOf(false) }
+object GymUi {
+    var minimized by mutableStateOf(false)
+    /** Rutina abierta en el editor (y si es nueva). */
+    var editing by mutableStateOf<Pair<Routine, Boolean>?>(null)
+}
 
 @Composable
 fun GymScreen(data: AppData) {
     val active = data.activeWorkout
     if (active != null && !GymUi.minimized) { ActiveWorkout(data, active); return }
+    GymUi.editing?.let { (r, isNew) -> RoutineEditor(data, r, isNew) { GymUi.editing = null }; return }
     var tab by rememberSaveable { mutableIntStateOf(0) }
     Column {
         ScreenTitle("Gimnasio", gymSubtitle(data))
@@ -64,6 +72,11 @@ fun gymSubtitle(data: AppData): String {
     val monday = mondayOf(today())
     val n = data.workouts.map { it.date }.filter { it >= monday }.distinct().size
     return "Esta semana: $n de ${data.settings.gymGoal} días"
+}
+
+fun startRoutine(r: Routine) {
+    GymUi.minimized = false
+    Repo.update { d -> d.copy(activeWorkout = d.startRoutineWorkout(r)) }
 }
 
 fun startWorkout(name: String, exerciseIds: List<String>) {
@@ -85,6 +98,7 @@ private fun GymOverview(data: AppData) {
 
     Column(Modifier.verticalScroll(rememberScrollState()).padding(horizontal = 16.dp).padding(bottom = 120.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         HeroWorkoutCard(data) { pickRoutine = true }
+        TipBubble("tip_tiles", "Toca un mosaico para ver el detalle de los últimos 30 días.")
 
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             StatTile(R.drawable.ic_clock, "%.1f".format(hours), "horas", Modifier.weight(1f)) { statSheet = 0 }
@@ -183,7 +197,7 @@ private fun HeroWorkoutCard(data: AppData, onPickOther: () -> Unit) {
         }
         Spacer(Modifier.height(20.dp))
         PrimaryButton("Empezar entrenamiento", icon = R.drawable.ic_play) {
-            if (r != null) startWorkout(r.name, r.exerciseIds) else startWorkout("Entrenamiento libre", emptyList())
+            if (r != null) startRoutine(r) else startWorkout("Entrenamiento libre", emptyList())
         }
         TextButton(onClick = onPickOther, modifier = Modifier.fillMaxWidth().padding(top = 4.dp)) { Text("Elegir otra rutina", color = Muted) }
     }
@@ -197,7 +211,7 @@ private fun RoutinePickerSheet(data: AppData, onDismiss: () -> Unit) {
         data.routines.forEach { r ->
             Row(
                 Modifier.fillMaxWidth().padding(vertical = 4.dp).clip(RoundedCornerShape(20.dp)).background(Color08)
-                    .clickable { startWorkout(r.name, r.exerciseIds); onDismiss() }.padding(16.dp),
+                    .clickable { startRoutine(r); onDismiss() }.padding(16.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Column(Modifier.weight(1f)) {
@@ -356,7 +370,20 @@ private fun ActiveWorkout(data: AppData, w: Workout) {
     var dialogSet by remember { mutableStateOf<Pair<Int, Int>?>(null) }
     var confirmDiscard by remember { mutableStateOf(false) }
     var noteFor by remember { mutableStateOf<String?>(null) }
-    var focus by rememberSaveable { mutableIntStateOf(w.entries.indexOfFirst { e -> e.sets.isEmpty() || e.sets.any { !it.done } }.coerceAtLeast(0)) }
+    var historyFor by remember { mutableStateOf<String?>(null) }
+    var focusUid by rememberSaveable { mutableStateOf((w.entries.firstOrNull { e -> e.sets.isEmpty() || e.sets.any { !it.done } } ?: w.entries.firstOrNull())?.uid) }
+    val focus = w.entries.indexOfFirst { it.uid == focusUid }.let { if (it < 0) 0 else it }
+    // Reordenar ejercicios manteniendo presionado
+    val listState = androidx.compose.foundation.lazy.rememberLazyListState()
+    val reorder = rememberReorderableLazyListState(listState) { from, to ->
+        Repo.update { d ->
+            d.copy(activeWorkout = d.activeWorkout?.let { aw ->
+                val l = aw.entries.toMutableList(); val f = l.indexOfFirst { it.uid == from.key }; val t = l.indexOfFirst { it.uid == to.key }
+                if (f >= 0 && t >= 0) l.add(t, l.removeAt(f)); aw.copy(entries = l)
+            })
+        }
+        Fx.tick()
+    }
     var activeSet by remember { mutableStateOf<Int?>(null) }
     val bests = remember(data.workouts) { w.entries.map { it.exerciseId }.distinct().associateWith { bestsFor(data, it) } }
     val now = rememberNow()
@@ -381,10 +408,23 @@ private fun ActiveWorkout(data: AppData, w: Workout) {
             val after = st.copy(done = true)
             if (isPr(after, prevBest) && !hadPr && Repo.data.settings.celebrationsOn) {
                 Fx.pr()
-                UiState.medal = MedalMsg("PR", "RÉCORD", Tier.Naranja, "Récord en ${exName(data, e.exerciseId)}", fmtSet(after).replace("×", " kg × ").let { if (after.km != null || after.seconds != null) fmtSet(after) else it })
+                val line = fmtSet(after).replace("×", " kg × ").let { if (after.km != null || after.seconds != null) fmtSet(after) else it }
+                UiState.medal = MedalMsg("PR", "RÉCORD", Tier.Naranja, "Récord en ${exName(data, e.exerciseId)}", line,
+                    share = ShareSpec("PR", "RÉCORD", Tier.Naranja, "Récord en\n${exName(data, e.exerciseId).lowercase()}", null,
+                        listOf("SERIE" to line, "1RM ESTIMADO" to "${fmtWeight(round1(oneRm(after)))} kg", "FECHA" to shareDate())))
             } else Fx.success()
-            // la siguiente serie pendiente pasa a ser la activa
-            activeSet = e.sets.indices.firstOrNull { it > si && !e.sets[it].done }
+            // Superserie: salta al otro ejercicio del grupo; si no, a la siguiente serie pendiente
+            val g = e.group
+            val nextInGroup = if (g == null) null else {
+                val members = w.entries.withIndex().filter { it.value.group == g }
+                val pos = members.indexOfFirst { it.index == ei }
+                (1..members.size).map { members[(pos + it) % members.size] }
+                    .firstOrNull { m -> m.value.sets.withIndex().any { (j, x) -> !x.done && !(m.index == ei && j == si) } }
+            }
+            if (nextInGroup != null && nextInGroup.index != ei) {
+                focusUid = nextInGroup.value.uid
+                activeSet = nextInGroup.value.sets.indexOfFirst { !it.done }
+            } else activeSet = e.sets.indices.firstOrNull { it > si && !e.sets[it].done }
         } else Fx.tick()
         setAt(ei, si) { it.copy(done = nowDone) }
     }
@@ -403,12 +443,16 @@ private fun ActiveWorkout(data: AppData, w: Workout) {
         Box(Modifier.padding(horizontal = 16.dp).fillMaxWidth().height(4.dp).clip(RoundedCornerShape(50)).background(CardHigh)) {
             Box(Modifier.fillMaxWidth(prog).fillMaxHeight().clip(RoundedCornerShape(50)).background(Accent))
         }
-        LazyColumn(Modifier.weight(1f), contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        LazyColumn(Modifier.weight(1f), state = listState, contentPadding = PaddingValues(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            item(key = "tip") { TipBubble("tip_workout", "Toca una fila para editarla y el número para escribir el peso exacto. Toca el nombre del ejercicio para ver su historial; mantén presionado para reordenar.") }
             if (w.entries.isEmpty()) item { EmptyState("gym", "Agrega tu primer ejercicio", "Usa el botón de abajo.") }
             w.entries.forEachIndexed { ei, e ->
-                item(key = "e$ei${e.exerciseId}") {
+                item(key = e.uid) { ReorderableItem(reorder, key = e.uid) { dragging ->
                     val exercise = data.exercises.firstOrNull { it.id == e.exerciseId }
-                    if (ei != focus) CollapsedExercise(data, e, exercise) { focus = ei; activeSet = null }
+                    val tag = e.group?.let { g -> "$g${w.entries.take(ei + 1).count { it.group == g }}" }
+                    val elev by androidx.compose.animation.core.animateDpAsState(if (dragging) 16.dp else 0.dp, label = "e")
+                    Box(Modifier.shadow(elev, RoundedCornerShape(28.dp)).longPressDraggableHandle(onDragStarted = { Fx.tick() })) {
+                    if (ei != focus) CollapsedExercise(data, e, exercise, tag) { focusUid = e.uid; activeSet = null }
                     else ExpandedExercise(
                         data, e, exercise, bests[e.exerciseId], activeSet,
                         onSelect = { si -> activeSet = if (activeSet == si) null else si },
@@ -422,10 +466,13 @@ private fun ActiveWorkout(data: AppData, w: Workout) {
                             upd { it.copy(entries = it.entries.mapIndexed { i, en -> if (i == ei) en.copy(sets = en.sets + base) else en }) }
                             activeSet = e.sets.size; Fx.tick()
                         },
-                        onRemove = { upd { it.copy(entries = it.entries.filterIndexed { i, _ -> i != ei }) }; focus = 0; activeSet = null },
+                        onRemove = { upd { it.copy(entries = it.entries.filterIndexed { i, _ -> i != ei }) }; focusUid = null; activeSet = null },
                         onNote = { noteFor = e.exerciseId },
+                        onHistory = { Fx.tick(); historyFor = e.exerciseId },
+                        tag = tag,
                     )
-                }
+                    }
+                } }
             }
             item { SecondaryButton("+ Agregar ejercicio") { addEx = true } }
             item {
@@ -446,7 +493,7 @@ private fun ActiveWorkout(data: AppData, w: Workout) {
     }
 
     if (addEx) ExercisePicker(data, onDismiss = { addEx = false }) { id ->
-        upd { it.copy(entries = it.entries + WorkEntry(id, plannedSets(data, id))) }; focus = w.entries.size; activeSet = null
+        val ne = WorkEntry(id, plannedSets(data, id)); upd { it.copy(entries = it.entries + ne) }; focusUid = ne.uid; activeSet = null
     }
     dialogSet?.let { (ei, si) ->
         val entry = w.entries.getOrNull(ei)
@@ -457,13 +504,14 @@ private fun ActiveWorkout(data: AppData, w: Workout) {
         ) { set -> setAt(ei, si) { set.copy(done = it.done) } }
     }
     noteFor?.let { id -> ExerciseNoteDialog(data, id) { noteFor = null } }
+    historyFor?.let { id -> ExerciseHistorySheet(data, id) { historyFor = null } }
     if (confirmDiscard) ConfirmDialog("Descartar entrenamiento", "Se perderán las series de este entrenamiento.", "Descartar", { confirmDiscard = false }) {
         Repo.update { it.copy(activeWorkout = null) }
     }
 }
 
 @Composable
-private fun CollapsedExercise(data: AppData, e: WorkEntry, ex: Exercise?, onClick: () -> Unit) {
+private fun CollapsedExercise(data: AppData, e: WorkEntry, ex: Exercise?, tag: String?, onClick: () -> Unit) {
     val done = e.sets.count { it.done }
     val target = if ((ex?.kind ?: 0) == 0) suggestTarget(lastSetsFor(data, e.exerciseId)) else null
     OdCard(onClick = onClick, padding = 14.dp) {
@@ -471,8 +519,12 @@ private fun CollapsedExercise(data: AppData, e: WorkEntry, ex: Exercise?, onClic
             IconChip("gym", if (e.sets.isNotEmpty() && done == e.sets.size) ChipState.Done else ChipState.Normal, 40.dp)
             Spacer(Modifier.width(8.dp))
             Column(Modifier.weight(1f)) {
-                Text(ex?.name ?: "Ejercicio", color = Ink, fontWeight = FontWeight.Medium)
-                Text("$done / ${e.sets.size} series" + (target?.let { " · objetivo ${fmtWeight(it.weight)} × ${it.reps}" } ?: ""), color = Muted, style = MaterialTheme.typography.bodySmall)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (tag != null) { SupersetTag(tag); Spacer(Modifier.width(6.dp)) }
+                    Text(ex?.name ?: "Ejercicio", color = Ink, fontWeight = FontWeight.Medium)
+                }
+                Text("$done / ${e.sets.size} series" + (e.repsMin?.let { " · objetivo ${e.sets.size} × $it–${e.repsMax}" } ?: target?.let { " · objetivo ${fmtWeight(it.weight)} × ${it.reps}" } ?: ""),
+                    color = Muted, style = MaterialTheme.typography.bodySmall)
             }
             Icon(Icons.Filled.KeyboardArrowRight, null, tint = Faint)
         }
@@ -483,7 +535,7 @@ private fun CollapsedExercise(data: AppData, e: WorkEntry, ex: Exercise?, onClic
 private fun ExpandedExercise(
     data: AppData, e: WorkEntry, ex: Exercise?, best: Bests?, activeSet: Int?,
     onSelect: (Int) -> Unit, onToggle: (Int) -> Unit, onChange: (Int, (WorkSet) -> WorkSet) -> Unit,
-    onMore: (Int) -> Unit, onAdd: () -> Unit, onRemove: () -> Unit, onNote: () -> Unit,
+    onMore: (Int) -> Unit, onAdd: () -> Unit, onRemove: () -> Unit, onNote: () -> Unit, onHistory: () -> Unit = {}, tag: String? = null,
 ) {
     val kind = ex?.kind ?: 0
     val prev = lastSetsFor(data, e.exerciseId)
@@ -493,11 +545,17 @@ private fun ExpandedExercise(
             IconChip("gym", size = 44.dp)
             Spacer(Modifier.width(6.dp))
             Column(Modifier.weight(1f)) {
-                Text(ex?.name ?: "Ejercicio", color = Ink, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.titleMedium)
+                Row(Modifier.clip(RoundedCornerShape(10.dp)).clickable(onClickLabel = "Ver historial", onClick = onHistory), verticalAlignment = Alignment.CenterVertically) {
+                    if (tag != null) { SupersetTag(tag); Spacer(Modifier.width(6.dp)) }
+                    Text(ex?.name ?: "Ejercicio", color = Ink, fontWeight = FontWeight.SemiBold, style = MaterialTheme.typography.titleMedium)
+                    Spacer(Modifier.width(6.dp)); Glyph("grafica", Muted, 15.dp, "Historial")
+                }
                 Row(Modifier.clip(RoundedCornerShape(50)).clickable(onClick = onNote).padding(vertical = 3.dp), verticalAlignment = Alignment.CenterVertically) {
                     Glyph("pin", Muted, 13.dp); Spacer(Modifier.width(5.dp))
                     Text(ex?.note?.ifBlank { null } ?: "Agregar nota", color = if (ex?.note.isNullOrBlank()) Faint else Ink2, style = MaterialTheme.typography.bodySmall)
                 }
+                if (e.repsMin != null) Text("Objetivo ${e.sets.size} × ${e.repsMin}–${e.repsMax}" + if (tag != null) " · superserie, se alternan" else "",
+                    color = Muted, style = MaterialTheme.typography.bodySmall)
             }
             if (target != null) Row(Modifier.clip(RoundedCornerShape(50)).background(if (target.up) AccentSoft else CardHigh).padding(horizontal = 10.dp, vertical = 6.dp),
                 verticalAlignment = Alignment.CenterVertically) {
@@ -693,7 +751,7 @@ fun Stepper(label: String, value: String, onChange: (String) -> Unit, step: Doub
 }
 
 @Composable
-private fun ExercisePicker(data: AppData, onDismiss: () -> Unit, onPick: (String) -> Unit) {
+fun ExercisePicker(data: AppData, onDismiss: () -> Unit, onPick: (String) -> Unit) {
     var query by remember { mutableStateOf("") }
     var creating by remember { mutableStateOf(false) }
     OdDialog(
@@ -939,71 +997,35 @@ private fun ExerciseProgress(data: AppData) {
 
 @Composable
 private fun RoutinesTab(data: AppData) {
-    var editing by remember { mutableStateOf<Routine?>(null) }
-    var creating by remember { mutableStateOf(false) }
     var newExercise by remember { mutableStateOf(false) }
-    LazyColumn(contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 120.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+    val listState = androidx.compose.foundation.lazy.rememberLazyListState()
+    val reorder = rememberReorderableLazyListState(listState) { from, to ->
+        Repo.update { d ->
+            val l = d.routines.toMutableList(); val f = l.indexOfFirst { it.id == from.key }; val t = l.indexOfFirst { it.id == to.key }
+            if (f >= 0 && t >= 0) l.add(t, l.removeAt(f)); d.copy(routines = l)
+        }
+        Fx.tick()
+    }
+    LazyColumn(state = listState, contentPadding = PaddingValues(start = 16.dp, end = 16.dp, bottom = 120.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         items(data.routines, key = { it.id }) { r ->
-            OdCard(onClick = { editing = r }) {
-                Text(r.name, fontWeight = FontWeight.SemiBold, color = Ink)
-                Spacer(Modifier.height(4.dp))
-                Text(r.exerciseIds.joinToString(" · ") { exName(data, it) }, color = Muted, style = MaterialTheme.typography.bodySmall)
+            ReorderableItem(reorder, key = r.id) { dragging ->
+                val elev by androidx.compose.animation.core.animateDpAsState(if (dragging) 16.dp else 0.dp, label = "e")
+                OdCard(Modifier.shadow(elev, RoundedCornerShape(28.dp)).longPressDraggableHandle(onDragStarted = { Fx.tick() }), onClick = { GymUi.editing = r to false }) {
+                    Text(r.name, fontWeight = FontWeight.SemiBold, color = Ink)
+                    Spacer(Modifier.height(4.dp))
+                    Text(r.plan.joinToString(" · ") { it2 -> exName(data, it2.exerciseId) + if (it2.group != null) " (${it2.group})" else "" }, color = Muted, style = MaterialTheme.typography.bodySmall)
+                    Spacer(Modifier.height(4.dp))
+                    Text(r.plan.sumOf { it.sets }.let { "$it series · ~${data.estimatedMinutes(r)} min" }, color = Faint, style = MaterialTheme.typography.bodySmall)
+                }
             }
         }
-        item { PrimaryButton("Nueva rutina") { creating = true } }
+        item { PrimaryButton("Nueva rutina") { GymUi.editing = Routine(name = "", exerciseIds = emptyList()) to true } }
         item { SecondaryButton("Crear ejercicio personalizado") { newExercise = true } }
         item { Text("Tienes ${data.exercises.size} ejercicios disponibles.", color = Faint, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(start = 8.dp)) }
     }
-    if (creating) RoutineDialog(data, null) { creating = false }
-    editing?.let { RoutineDialog(data, it) { editing = null } }
     if (newExercise) ExerciseDialog(onDismiss = { newExercise = false })
 }
 
-@Composable
-private fun RoutineDialog(data: AppData, initial: Routine?, onDismiss: () -> Unit) {
-    var name by remember { mutableStateOf(initial?.name ?: "") }
-    val chosen = remember { mutableStateListOf<String>().apply { addAll(initial?.exerciseIds ?: emptyList()) } }
-    var confirmDelete by remember { mutableStateOf(false) }
-    OdDialog(
-        onDismissRequest = onDismiss,
-        title = { Text(if (initial == null) "Nueva rutina" else "Editar rutina") },
-        text = {
-            Column {
-                OutlinedTextField(name, { name = it }, label = { Text("Nombre (ej. Pecho y tríceps)") }, singleLine = true, shape = RoundedCornerShape(18.dp), modifier = Modifier.fillMaxWidth())
-                Text("${chosen.size} ejercicio(s), en el orden en que los marques", color = Muted, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(top = 8.dp))
-                LazyColumn(Modifier.heightIn(max = 360.dp)) {
-                    MUSCLES.forEach { m ->
-                        val group = data.exercises.filter { it.muscle == m }
-                        if (group.isNotEmpty()) {
-                            item { Text(m.uppercase(), color = Faint, style = MaterialTheme.typography.labelMedium, letterSpacing = 1.2.sp, modifier = Modifier.padding(top = 12.dp)) }
-                            items(group, key = { it.id }) { ex ->
-                                Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                                    RoundCheck(ex.id in chosen, { if (ex.id in chosen) chosen.remove(ex.id) else chosen.add(ex.id) }, ex.name)
-                                    Text(ex.name, color = Ink, modifier = Modifier.weight(1f))
-                                    val pos = chosen.indexOf(ex.id)
-                                    if (pos >= 0) Text("${pos + 1}", color = Accent, fontWeight = FontWeight.Bold)
-                                }
-                            }
-                        }
-                    }
-                    if (initial != null) item { TextButton(onClick = { confirmDelete = true }) { Text("Eliminar rutina", color = Bad) } }
-                }
-            }
-        },
-        confirmButton = {
-            TextButton(enabled = name.isNotBlank() && chosen.isNotEmpty(), onClick = {
-                val r = (initial ?: Routine(name = "", exerciseIds = emptyList())).copy(name = name.trim(), exerciseIds = chosen.toList())
-                Repo.update { d -> d.copy(routines = if (initial == null) d.routines + r else d.routines.map { if (it.id == r.id) r else it }) }
-                onDismiss()
-            }) { Text("Guardar") }
-        },
-        dismissButton = { TextButton(onClick = onDismiss) { Text("Cancelar", color = Muted) } },
-    )
-    if (confirmDelete && initial != null) ConfirmDialog("Eliminar rutina", "¿Eliminar \"${initial.name}\"? Tu historial no se borra.", onDismiss = { confirmDelete = false }) {
-        Repo.update { d -> d.copy(routines = d.routines.filterNot { it.id == initial.id }) }
-        onDismiss()
-    }
-}
 
 
 /** Número que se toca y se escribe directo (ej. 7, 8 o 5.9 kg). */
@@ -1026,3 +1048,8 @@ private fun TypedNumber(value: Double, decimals: Boolean, onValue: (Double) -> U
         modifier = Modifier.fillMaxWidth().semantics { contentDescription = "Escribir valor" },
     )
 }
+
+
+@Composable
+fun SupersetTag(tag: String) = Text(tag, color = AccentText, fontFamily = Display, fontWeight = FontWeight.Bold, fontSize = 13.sp,
+    modifier = Modifier.clip(RoundedCornerShape(8.dp)).background(AccentSoft).padding(horizontal = 7.dp, vertical = 1.dp))

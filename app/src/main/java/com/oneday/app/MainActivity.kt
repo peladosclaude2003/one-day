@@ -8,10 +8,15 @@ import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.animation.togetherWith
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.runtime.*
@@ -40,7 +45,10 @@ class MainActivity : ComponentActivity() {
             OneDayTheme {
                 val data by Repo.state.collectAsStateWithLifecycle()
                 var tab by rememberSaveable { mutableIntStateOf(0) }
-                var settings by remember { mutableStateOf(false) }
+                var profile by rememberSaveable { mutableStateOf(false) }
+                // Inicio animado: solo al abrir la app en frío y con animaciones activas
+                var splash by rememberSaveable { mutableStateOf(savedInstanceState == null && data.settings.animationsOn) }
+                val rise by androidx.compose.animation.core.animateFloatAsState(if (splash) 1f else 0f, androidx.compose.animation.core.tween(420), label = "rise")
 
                 // Cada vez que cambian tareas, rachas o ajustes, se reprograman los recordatorios.
                 LaunchedEffect(data.tasks, data.settings, data.streaks.size, data.habits, data.cravings.size) { Notifier.rescheduleAll(this@MainActivity) }
@@ -62,18 +70,32 @@ class MainActivity : ComponentActivity() {
                 }
 
                 Box(Modifier.fillMaxSize().background(Bg)) {
-                    Box(Modifier.fillMaxSize().blur(backgroundBlur()).statusBarsPadding().navigationBarsPadding()) {
-                        when (tab) {
-                            0 -> TodayScreen(data, onOpenSettings = { settings = true }, onGoTab = { tab = it })
-                            1 -> TasksScreen(data)
-                            2 -> StreaksScreen(data)
-                            else -> GymScreen(data)
+                    Box(Modifier.fillMaxSize().blur(backgroundBlur()).statusBarsPadding().navigationBarsPadding()
+                        .graphicsLayer { translationY = rise * 60.dp.toPx(); alpha = 1f - rise }) {
+                        // Las pestañas se deslizan hacia el lado de la pestaña elegida
+                        AnimatedContent(
+                            targetState = tab,
+                            transitionSpec = {
+                                if (!data.settings.animationsOn) (fadeIn(androidx.compose.animation.core.snap()) togetherWith fadeOut(androidx.compose.animation.core.snap()))
+                                else {
+                                    val dir = if (targetState > initialState) 1 else -1
+                                    (slideInHorizontally(androidx.compose.animation.core.tween(280)) { it / 4 * dir } + fadeIn(androidx.compose.animation.core.tween(280))) togetherWith
+                                        (slideOutHorizontally(androidx.compose.animation.core.tween(220)) { -it / 4 * dir } + fadeOut(androidx.compose.animation.core.tween(180)))
+                                }
+                            }, label = "tabs",
+                        ) { t ->
+                            when (t) {
+                                0 -> TodayScreen(data, onOpenSettings = { profile = true }, onGoTab = { tab = it })
+                                1 -> TasksScreen(data)
+                                2 -> StreaksScreen(data)
+                                else -> GymScreen(data)
+                            }
                         }
                     }
                     UndoBar(Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(bottom = 92.dp))
                     MedalToast(Modifier.align(Alignment.TopCenter).statusBarsPadding().padding(top = 8.dp))
                     AnimatedVisibility(
-                        visible = !(UiState.hideNav && tab == 3) && UiState.sosStreak == null,
+                        visible = !(UiState.hideNav && tab == 3) && UiState.sosStreak == null && !profile,
                         enter = fadeIn() + slideInVertically { it }, exit = fadeOut() + slideOutVertically { it },
                         modifier = Modifier.align(Alignment.BottomCenter).navigationBarsPadding().padding(bottom = 16.dp),
                     ) {
@@ -81,7 +103,11 @@ class MainActivity : ComponentActivity() {
                     }
                 }
                 UiState.sosStreak?.let { id -> SosOverlay(id) { UiState.sosStreak = null } }
-                if (settings) SettingsDialog(data) { settings = false }
+                UiState.share?.let { spec -> ShareSheet(spec) { UiState.share = null } }
+                AnimatedVisibility(splash, exit = fadeOut(androidx.compose.animation.core.tween(220))) { SplashOverlay { splash = false } }
+                AnimatedVisibility(profile, enter = slideInHorizontally { it } + fadeIn(), exit = slideOutHorizontally { it } + fadeOut()) {
+                    ProfileScreen(data) { profile = false }
+                }
             }
         }
     }

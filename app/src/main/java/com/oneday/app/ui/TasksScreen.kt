@@ -55,6 +55,7 @@ fun TasksScreen(data: AppData) {
             CircleButton("Nuevo pendiente", accent = true, onClick = { creating = true }) { Icon(Icons.Filled.Add, null, tint = Bg) }
         }
         Segmented(listOf("Por hacer", "Hoy", "Hechos"), filter, { filter = it }, Modifier.padding(horizontal = 16.dp))
+        if (data.tasks.any { !it.done }) TipBubble("tip_swipe", "Desliza un pendiente a la derecha para marcarlo hecho, o a la izquierda para pasarlo a mañana.", Modifier.padding(start = 16.dp, end = 16.dp, top = 10.dp))
         // Áreas: píldoras para filtrar, con cuántos pendientes tiene cada una
         val open = data.tasks.filter { !it.done }
         LazyRow(contentPadding = PaddingValues(horizontal = 16.dp, vertical = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {

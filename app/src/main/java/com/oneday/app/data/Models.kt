@@ -56,8 +56,15 @@ const val SET_WARMUP = 1
 const val SET_FAILURE = 2
 const val SET_DROP = 3
 
+/** Ejercicio dentro de una rutina: series y repeticiones objetivo; `group` une superseries (A, B…). */
 @Serializable
-data class Routine(val id: String = newId(), val name: String, val exerciseIds: List<String>)
+data class RoutineItem(val exerciseId: String, val sets: Int = 3, val repsMin: Int = 8, val repsMax: Int = 12, val group: String? = null)
+
+@Serializable
+data class Routine(val id: String = newId(), val name: String, val exerciseIds: List<String>, val items: List<RoutineItem> = emptyList()) {
+    /** Los ejercicios con su objetivo (las rutinas antiguas solo tenían la lista). */
+    val plan: List<RoutineItem> get() = items.ifEmpty { exerciseIds.map { RoutineItem(it) } }
+}
 
 /** kind = tipo de serie (normal, calentamiento, al fallo, drop). rpe = esfuerzo 1–10. seconds/km para ejercicios de tiempo o distancia. */
 @Serializable
@@ -72,7 +79,14 @@ data class WorkSet(
 )
 
 @Serializable
-data class WorkEntry(val exerciseId: String, val sets: List<WorkSet> = emptyList())
+data class WorkEntry(
+    val exerciseId: String,
+    val sets: List<WorkSet> = emptyList(),
+    val group: String? = null,      // superserie
+    val repsMin: Int? = null,       // objetivo de la rutina
+    val repsMax: Int? = null,
+    val uid: String = newId(),      // identificador estable (para reordenar)
+)
 
 @Serializable
 data class Workout(
@@ -134,6 +148,8 @@ data class Settings(
     val weightStep: Double = 1.0,     // cuánto suman los botones − / + del peso
     val stepsAsked: Boolean = false,  // ya se ofreció conectar los pasos
     val stepsGoalDismissedAt: Long = 0,
+    val lastBackupAt: Long = 0,
+    val seenTips: Set<String> = emptySet(),
 )
 
 @Serializable

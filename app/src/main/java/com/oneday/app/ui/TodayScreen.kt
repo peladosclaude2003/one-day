@@ -18,6 +18,7 @@ import com.oneday.app.R
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.semantics.Role
@@ -50,15 +51,19 @@ fun TodayScreen(data: AppData, onOpenSettings: () -> Unit, onGoTab: (Int) -> Uni
     Column(Modifier.verticalScroll(rememberScrollState()).padding(bottom = 120.dp)) {
         ScreenTitle(greeting, fmtLongDate(LocalDate.now())) {
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                CircleButton("Ajustes", onClick = onOpenSettings) { Glyph("ajustes", Ink2, 20.dp) }
+                CircleButton("Tú y ajustes", onClick = onOpenSettings) {
+                    Text(data.settings.userName.ifBlank { "Tú" }.take(1).uppercase(), fontFamily = Display, fontWeight = FontWeight.Bold, fontSize = 17.sp, color = Ink)
+                }
                 CircleButton("Agregar al día", accent = true, onClick = { creating = true }) { Glyph("mas", Bg, 20.dp) }
             }
         }
         Column(Modifier.padding(horizontal = 16.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
             WeekStrip(data, day) { day = it }
 
-            // Tarjeta principal: lo siguiente
-            OdCard(padding = 20.dp) {
+            // Tarjeta principal: lo siguiente (pulso naranja al completar el día)
+            val dayDone = todays.isNotEmpty() && next == null
+            val (_, dayGlint) = rememberGoalCelebration(dayDone)
+            OdCard(Modifier.border(2.dp, Accent.copy(alpha = if (dayGlint >= 0f) (1f - dayGlint) else 0f), RoundedCornerShape(28.dp)), padding = 20.dp) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(if (next != null) "SIGUIENTE" else "HOY", color = Muted, style = MaterialTheme.typography.labelMedium, letterSpacing = 1.6.sp,
                         fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
@@ -111,6 +116,7 @@ fun TodayScreen(data: AppData, onOpenSettings: () -> Unit, onGoTab: (Int) -> Uni
             if (!data.settings.stepsAsked && data.habits.none { it.source == "steps" }) StepsConnectCard()
 
             // Hábitos como fichas
+            if (data.habits.isNotEmpty()) TipBubble("tip_habit_tile", "Toca una ficha de hábito para marcarla o sumar.")
             if (data.habits.isNotEmpty()) {
                 val doneH = data.habits.count { t in it.doneDays }
                 Row(verticalAlignment = Alignment.Bottom) {
@@ -210,6 +216,7 @@ fun HabitTile(h: Habit, t: Long) {
     val done = t in h.doneDays
     val p = when { done -> 1f; h.target != null -> (h.countToday(t).toFloat() / h.target).coerceIn(0f, 1f); else -> 0f }
     val anim by androidx.compose.animation.core.animateFloatAsState(p, label = "ring")
+    val (flip, glint) = rememberGoalCelebration(done)
     Column(
         Modifier.width(96.dp).clip(RoundedCornerShape(22.dp)).background(CardBg).border(1.dp, Hairline, RoundedCornerShape(22.dp))
             .clickable(role = Role.Button, onClickLabel = h.name) {
@@ -225,8 +232,11 @@ fun HabitTile(h: Habit, t: Long) {
                 drawArc(Line, 0f, 360f, false, style = Stroke(sw), topLeft = androidx.compose.ui.geometry.Offset(sw / 2, sw / 2), size = androidx.compose.ui.geometry.Size(size.width - sw, size.height - sw))
                 if (anim > 0f) drawArc(if (done) Ink else Accent, -90f, 360f * anim, false, style = Stroke(sw, cap = StrokeCap.Round),
                     topLeft = androidx.compose.ui.geometry.Offset(sw / 2, sw / 2), size = androidx.compose.ui.geometry.Size(size.width - sw, size.height - sw))
+                // destello que recorre el anillo una vez al cumplir la meta
+                if (glint >= 0f) drawArc(Accent.copy(alpha = 1f - glint * 0.6f), -90f + 360f * glint - 30f, 60f, false, style = Stroke(sw * 1.8f, cap = StrokeCap.Round),
+                    topLeft = androidx.compose.ui.geometry.Offset(sw / 2, sw / 2), size = androidx.compose.ui.geometry.Size(size.width - sw, size.height - sw))
             }
-            Box(Modifier.size(36.dp).clip(RoundedCornerShape(12.dp)).background(when { done -> Ink; p > 0f -> AccentSoft; else -> CardHigh }), contentAlignment = Alignment.Center) {
+            Box(Modifier.size(36.dp).graphicsLayer { rotationY = flip; cameraDistance = 12f * density }.clip(RoundedCornerShape(12.dp)).background(when { done -> Ink; p > 0f -> AccentSoft; else -> CardHigh }), contentAlignment = Alignment.Center) {
                 Glyph(h.emoji, when { done -> Bg; p > 0f -> Accent; else -> Ink2 }, 19.dp, h.name)
             }
         }

@@ -380,3 +380,29 @@ fun AppData.reopenTask(id: String): AppData {
     val t = tasks.firstOrNull { it.id == id } ?: return this
     return copy(tasks = tasks.filterNot { it.id == t.nextId && !it.done }.map { if (it.id == id) it.copy(done = false, doneAt = null, nextId = null) else it })
 }
+
+
+/**
+ * Series planeadas desde un ejercicio de rutina (doble progresión):
+ * si la última vez llegaste al máximo del rango en todas las series pesadas, sube el peso y vuelve al mínimo;
+ * si no, mismo peso y una repetición más (sin pasar del máximo).
+ */
+fun plannedFor(data: AppData, item: RoutineItem): List<WorkSet> {
+    val kind = data.exercises.firstOrNull { it.id == item.exerciseId }?.kind ?: 0
+    val last = lastSetsFor(data, item.exerciseId)
+    if (kind != 0) {
+        val base = last?.lastOrNull()?.copy(done = false, rpe = null) ?: if (kind == 1) WorkSet(0.0, 0, seconds = 30, done = false) else WorkSet(0.0, 0, seconds = 1200, km = 2.0, done = false)
+        return List(item.sets) { base }
+    }
+    if (last.isNullOrEmpty()) return List(item.sets) { WorkSet(0.0, item.repsMax, done = false) }
+    val top = last.maxOf { it.weight }
+    val topSets = last.filter { it.weight == top }
+    val reachedMax = topSets.all { it.reps >= item.repsMax } && topSets.none { (it.rpe ?: 0) >= 9 }
+    val inc = if (top >= 20) 2.5 else 1.0
+    val (w, r) = if (reachedMax && top > 0) round1(top + inc) to item.repsMin
+        else top to (topSets.minOf { it.reps } + 1).coerceIn(item.repsMin, item.repsMax)
+    return List(item.sets) { WorkSet(w, r, done = false) }
+}
+
+fun AppData.startRoutineWorkout(r: Routine): Workout =
+    Workout(date = today(), name = r.name, entries = r.plan.map { WorkEntry(it.exerciseId, plannedFor(this, it), it.group, it.repsMin, it.repsMax) })
